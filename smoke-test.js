@@ -130,6 +130,8 @@ if (!failed && rafCb) {
     if (f % 60 === 0) {
       (globalListeners.pointermove || []).forEach(fn => fn({ clientX: 100 + f % 500, clientY: 200 + f % 400 }));
       (globalListeners.keydown || []).forEach(fn => fn({ key: 'a', keyCode: 65 }));
+      // run harvester + HUD ticks so entropy E rises during the simulation
+      intervals.forEach(iv => { try { iv.fn(); } catch (e) { throw e; } });
     }
     if (f === 100) { (globalListeners.keydown || []).forEach(fn => fn({ key: '2', keyCode: 50 })); modeIdx = 1; }
     if (f === 200) { (globalListeners.keydown || []).forEach(fn => fn({ key: '3', keyCode: 51 })); modeIdx = 2; }
@@ -177,6 +179,33 @@ if (!failed) {
       failed = true;
     }
   } catch (e) { console.error('GRAIN PALETTE CHECK ERROR:', e.message); failed = true; }
+}
+
+// verify the noise field freezes when all sources are disabled (E=0)
+if (!failed) {
+  try {
+    // disable every source, let E decay, and confirm grain stops being re-rolled
+    vm.runInContext('srcList.forEach(s => s.enabled = false)', sandbox);
+    for (let i = 0; i < 12; i++) intervals.forEach(iv => { try { iv.fn(); } catch (e) {} });
+    const before = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    // run 20 noise frames with E=0
+    let noiseFrames = 0, f2 = 0;
+    while (noiseFrames < 20 && f2 < 200) {
+      f2++;
+      try { rafCb(performance.now() + f2 * 16.6); } catch (e) { throw e; }
+      const m = vm.runInContext('mode', sandbox);
+      if (m === 'noise') noiseFrames++;
+    }
+    const after = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    if (before === after) {
+      console.log('NOISE FREEZE OK (static unchanged with all sources off)');
+    } else {
+      console.error('NOISE FREEZE FAILED: static changed while E=0');
+      failed = true;
+    }
+    // restore enabled state
+    vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
+  } catch (e) { console.error('NOISE FREEZE CHECK ERROR:', e.message); failed = true; }
 }
 
 // verify grid actually populated during its time in grid mode (frames 0-100)

@@ -724,7 +724,7 @@ function tickGrain(frac) {
   const len = grain.cw * grain.ch;
   const k = Math.max(1, Math.round(len * frac));
   const buf = crBytes(k * 2);
-  const rot = ((nowT * 20) | 0) % 256; // slow sweep through the whole wheel
+  const rot = ((nowT * 20 * E) | 0) % 256; // hue sweep scales with entropy: 0 when all sources off
   const data = grain.img.data;
   let bi = 0;
   for (let j = 0; j < k; j++) {
@@ -741,9 +741,9 @@ function tickGrain(frac) {
   grain.gctx.putImageData(grain.img, 0, 0);
 }
 function drawNoise() {
-  // full-opacity, full-spectrum colored static; entropy controls how fast it boils
-  const T = E;
-  tickGrain(Math.min(0.8, 0.2 + T * 0.7));
+  // full-opacity, full-spectrum colored static; entropy drives the boil rate.
+  // With every source disabled (E≈0) the field freezes completely.
+  if (E > 0.005) tickGrain(Math.min(0.8, 0.2 + E * 0.7));
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
   ctx.drawImage(grain.cv, 0, 0, W, H);
