@@ -350,14 +350,19 @@ if (!failed) {
     const partBefore = vm.runInContext('part.n', sandbox);
     (globalListeners.pointermove || []).forEach(fn => fn({ clientX: 300, clientY: 300 }));
     const partAfter = vm.runInContext('part.n', sandbox);
+    // clicking near the white particles must erode them immediately (collision)
+    const freeBeforeClick = vm.runInContext('(function(){ let f=0; for(let i=0;i<chaos.n;i++) if(chaos.free[i]) f++; return f; })()', sandbox);
+    (globalListeners.pointerdown || []).forEach(fn => fn({ clientX: TEST_W / 2, clientY: TEST_H / 2 }));
+    const freeAfterClick = vm.runInContext('(function(){ let f=0; for(let i=0;i<chaos.n;i++) if(chaos.free[i]) f++; return f; })()', sandbox);
     // entropy releases the anchored art particles (deterioration)
     vm.runInContext('E = 0.5', sandbox);
     for (let i = 0; i < 60; i++) rafCb(performance.now() + 4000 + i * 16.6);
     const cFree = vm.runInContext('(function(){ let f=0; for(let i=0;i<chaos.n;i++) if(chaos.free[i]) f++; return f; })()', sandbox);
-    if (cFresh > 0 && partAfter > partBefore && cFree > 0) {
-      console.log('PARTICLES CHAOS OK (' + cFresh + ' anchored, ' + cFree + ' released, pointer spawned ' + (partAfter - partBefore) + ')');
+    const erodeClick = freeAfterClick > freeBeforeClick;
+    if (cFresh > 0 && partAfter > partBefore && cFree > 0 && erodeClick) {
+      console.log('PARTICLES CHAOS OK (' + cFresh + ' anchored, click eroded +' + (freeAfterClick - freeBeforeClick) + ', ' + cFree + ' released total, pointer spawned ' + (partAfter - partBefore) + ')');
     } else {
-      console.error('PARTICLES CHAOS FAILED: fresh=' + cFresh + ' spawned=' + (partAfter - partBefore) + ' free=' + cFree);
+      console.error('PARTICLES CHAOS FAILED: fresh=' + cFresh + ' spawned=' + (partAfter - partBefore) + ' free=' + cFree + ' clickEroded=' + erodeClick);
       failed = true;
     }
     vm.runInContext('E = 0', sandbox);

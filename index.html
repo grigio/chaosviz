@@ -368,6 +368,7 @@ addEventListener('pointerdown', e => {
   ptrS.bps = Math.min(ptr.speed * 0.8 + 200, ptrS.max);
   ptrS.lastSample = t;
   Pool.add((((x * 40503) ^ ((t * 1000) | 0)) >>> 0));
+  if (mode === 'particles') chaosErode(x, y, 70, 1.6); // click collides: erode CHAOS near the cursor
   paintAt(x, y, 1.6); // clicking leaves a bigger splat
 }, { passive: true });
 
@@ -590,6 +591,24 @@ function updateChaos(dt) {
     if (chaos.y[i] < 0) chaos.y[i] += H; else if (chaos.y[i] >= H) chaos.y[i] -= H;
   }
 }
+function chaosErode(sx, sy, radius, strength) {
+  // collision: release anchored white CHAOS particles near the point and push
+  // them outward, eroding the letters faster right where the pointer hits
+  if (!chaos.n) return;
+  const r2 = radius * radius;
+  const push = 6 * (strength || 1);
+  for (let i = 0; i < chaos.n; i++) {
+    if (chaos.free[i]) continue;
+    const dx = chaos.x[i] - sx, dy = chaos.y[i] - sy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < r2) {
+      const d = Math.sqrt(d2) || 1;
+      chaos.free[i] = 1;
+      chaos.vx[i] = (dx / d) * push + (prng() - 0.5) * 2;
+      chaos.vy[i] = (dy / d) * push + (prng() - 0.5) * 2;
+    }
+  }
+}
 function partSpawnAt(sx, sy, boost) {
   // the pointer paints particles directly onto the canvas
   const n = Math.max(1, Math.round((4 + ptr.speed * 0.01) * (1 + (boost || 0))));
@@ -780,7 +799,11 @@ function paintBrush(gx, gy, speed, boost) {
   grain.gctx.putImageData(grain.img, 0, 0);
 }
 function paintAt(sx, sy, boost) {
-  if (mode === 'particles') { partSpawnAt(sx, sy, boost); return; } // paint particles directly
+  if (mode === 'particles') {
+    chaosErode(sx, sy, 24 + ptr.speed * 0.02, 0.7); // the paint spray collides with the white particles
+    partSpawnAt(sx, sy, boost); // paint particles directly
+    return;
+  }
   if (!grain.scale) return; // screen geometry not ready yet
   const gx = (sx - grain.ox) / grain.scale;
   const gy = (sy - grain.oy) / grain.scale;
