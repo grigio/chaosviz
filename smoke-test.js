@@ -266,10 +266,18 @@ if (!failed) {
     // A) with entropy present the static must boil (change between frames)
     vm.runInContext('E = 0.5', sandbox);
     const base = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
-    for (let i = 0; i < 8; i++) rafCb(performance.now() + i * 16.6);
+    for (let i = 0; i < 40; i++) rafCb(performance.now() + i * 16.6);
     const boiled = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
     if (boiled !== base) console.log('NOISE BOIL OK (static changes with entropy present)');
     else { console.error('NOISE BOIL FAILED: static unchanged at E=0.5'); failed = true; }
+    // no unfilled lines: every cell colored, and no all-black row or column
+    const cover = vm.runInContext('(function(){ const d=grain.img.data, cw=grain.cw, ch=grain.ch; let nz=0, allBlackRows=0, allBlackCols=0; for(let y=0;y<ch;y++){ let row=0; for(let x=0;x<cw;x++){ const o=(y*cw+x)*4; if(d[o]||d[o+1]||d[o+2]){ nz++; row++; } } if(row===0) allBlackRows++; } for(let x=0;x<cw;x++){ let col=0; for(let y=0;y<ch;y++){ const o=(y*cw+x)*4; if(d[o]||d[o+1]||d[o+2]) col++; } if(col===0) allBlackCols++; } return {pct: nz/(cw*ch)*100, rows: allBlackRows, cols: allBlackCols}; })()', sandbox);
+    if (cover.pct > 99 && cover.rows === 0 && cover.cols === 0) {
+      console.log('NOISE NO LINES OK (' + cover.pct.toFixed(2) + '% colored, 0 empty rows/cols)');
+    } else {
+      console.error('NOISE LINES FAILED: pct=' + cover.pct.toFixed(2) + ' emptyRows=' + cover.rows + ' emptyCols=' + cover.cols);
+      failed = true;
+    }
     // B) all sources disabled -> E decays below threshold -> field freezes bit-for-bit
     vm.runInContext('srcList.forEach(s => s.enabled = false)', sandbox);
     for (let i = 0; i < 20; i++) intervals.forEach(iv => { try { iv.fn(); } catch (e) {} });
@@ -344,7 +352,7 @@ if (!failed) {
 // that dissolve as entropy flows, and the pointer paints particles directly
 if (!failed) {
   try {
-    vm.runInContext('mode = "particles"; partReset(); chaosReset()', sandbox);
+    vm.runInContext('mode = "particles"; artReset(); partReset(); chaosReset()', sandbox);
     const cFresh = vm.runInContext('chaos.n', sandbox);
     // pointer paints particles directly in this mode (no frames running)
     const partBefore = vm.runInContext('part.n', sandbox);
