@@ -80,8 +80,6 @@ const win = {
 };
 
 let rafCb = null;
-let gridMaxCells = 0;
-let maxBadCells = 0;
 // controllable clock so the harness can simulate the passage of time
 const clock = { t: performance.now() };
 const performanceStub = { now: () => clock.t };
@@ -125,10 +123,23 @@ try {
   failed = true;
 }
 
+// initial noise must be full black (all RGB channels zero) right after init
+if (!failed) {
+  try {
+    const blackPct = vm.runInContext('(function(){ const d=grain.img.data; let nz=0; for(let i=0;i<d.length;i+=4) if(d[i]||d[i+1]||d[i+2]) nz++; return (1 - nz/(d.length/4)) * 100; })()', sandbox);
+    if (blackPct > 99.9) {
+      console.log('NOISE INIT BLACK OK (' + blackPct.toFixed(1) + '% black pixels)');
+    } else {
+      console.error('NOISE INIT BLACK FAILED: only ' + blackPct.toFixed(1) + '% black pixels');
+      failed = true;
+    }
+  } catch (e) { console.error('NOISE INIT BLACK CHECK ERROR:', e.message); failed = true; }
+}
+
 // simulate frames
 if (!failed && rafCb) {
   let now = performance.now();
-  const modes = ['grid', 'particles', 'noise', 'rain'];
+  const modes = ['noise', 'particles', 'rain'];
   let modeIdx = 0;
   const frames = 400;
   for (let f = 0; f < frames; f++) {
@@ -140,9 +151,8 @@ if (!failed && rafCb) {
       // run harvester + HUD ticks so entropy E rises during the simulation
       runIntervals();
     }
-    if (f === 100) { (globalListeners.keydown || []).forEach(fn => fn({ key: '2', keyCode: 50 })); modeIdx = 1; }
-    if (f === 200) { (globalListeners.keydown || []).forEach(fn => fn({ key: '3', keyCode: 51 })); modeIdx = 2; }
-    if (f === 300) { (globalListeners.keydown || []).forEach(fn => fn({ key: '4', keyCode: 52 })); modeIdx = 3; }
+    if (f === 150) { (globalListeners.keydown || []).forEach(fn => fn({ key: '2', keyCode: 50 })); modeIdx = 1; }
+    if (f === 300) { (globalListeners.keydown || []).forEach(fn => fn({ key: '3', keyCode: 51 })); modeIdx = 2; }
     try { rafCb(now); }
     catch (e) {
       errors.push('frame ' + f + ' [' + modes[modeIdx] + ']: ' + e.message);
@@ -150,22 +160,12 @@ if (!failed && rafCb) {
       failed = true;
       break;
     }
-    const gsz = vm.runInContext('grid.cells.size', sandbox);
-    if (gsz > gridMaxCells) gridMaxCells = gsz;
-    const badCells = vm.runInContext('Array.from(grid.cells.values()).filter(v=>!(typeof v.key === "number" && isFinite(v.key))).length', sandbox);
-    if (badCells > maxBadCells) maxBadCells = badCells;
   }
   if (!failed) console.log('FRAMES OK (' + frames + ' frames, all modes)');
 }
 
-// verify every fillRect got finite numeric coordinates (grid cells must be visible)
+// verify every fillRect got finite numeric coordinates
 if (!failed) {
-  if (maxBadCells > 0) {
-    console.error('BAD CELL KEYS: ' + maxBadCells + ' cells had non-numeric keys (prng out-of-bounds bug)');
-    failed = true;
-  } else {
-    console.log('CELL KEYS OK (all ' + gridMaxCells + ' peak cells have valid numeric keys)');
-  }
   const bad = fillRects.filter(a => a.slice(0, 4).some(v => typeof v !== 'number' || !isFinite(v)));
   if (bad.length === 0) {
     console.log('FILLRECT COORDS OK (' + fillRects.length + ' draw calls, all finite)');
@@ -246,21 +246,6 @@ if (!failed) {
     }
     vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
   } catch (e) { console.error('POINTER IDLE DECAY CHECK ERROR:', e.message); failed = true; }
-}
-
-// verify grid actually populated during its time in grid mode (frames 0-100)
-if (!failed) {
-  try {
-    if (gridMaxCells >= 30) {
-      console.log('GRID POPULATION OK (' + gridMaxCells + ' cells alive at peak)');
-    } else {
-      console.error('GRID POPULATION FAILED: peak=' + gridMaxCells);
-      failed = true;
-    }
-  } catch (e) {
-    console.error('GRID CHECK ERROR:', e.message);
-    failed = true;
-  }
 }
 
 // verify pause toggles

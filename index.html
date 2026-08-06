@@ -159,9 +159,8 @@
     </div>
   </header>
   <nav id="modes">
-    <button class="mode-btn active" data-mode="grid">GRID</button>
+    <button class="mode-btn active" data-mode="noise">NOISE</button>
     <button class="mode-btn" data-mode="particles">PARTICLES</button>
-    <button class="mode-btn" data-mode="noise">NOISE</button>
     <button class="mode-btn" data-mode="rain">RAIN</button>
   </nav>
   <aside id="panel">
@@ -175,7 +174,7 @@
       <div id="harvest"></div>
     </div>
   </aside>
-  <footer id="hint">h hud · p pause · 1-4 modes</footer>
+  <footer id="hint">h hud · p pause · 1-3 modes</footer>
 </div>
 <script>
 'use strict';
@@ -343,31 +342,46 @@ setInterval(() => {
   if (!timerS.enabled) return;
   const t = performance.now();
   timerS.bps = timerS.est.note(t);
+  timerS.lastSample = t;
   Pool.add((t * 1000) | 0);
 }, 4);
 
+const ptr = { x: -1, y: -1, lx: -1, ly: -1, lt: 0, speed: 0 };
 addEventListener('pointermove', e => {
   if (!ptrS.enabled) return;
   const t = performance.now();
-  ptrS.bps = ptrS.est.note(t);
-  Pool.add(((e.clientX * 2654435761) ^ (e.clientY * 40503) ^ ((t * 1000) | 0)) >>> 0);
+  const x = e.clientX, y = e.clientY;
+  if (ptr.lx >= 0 && t > ptr.lt) {
+    const dt = (t - ptr.lt) / 1000;
+    const sp = Math.hypot(x - ptr.lx, y - ptr.ly) / dt;
+    ptr.speed = ptr.speed * 0.7 + sp * 0.3;
+  }
+  ptr.lx = x; ptr.ly = y; ptr.lt = t; ptr.x = x; ptr.y = y;
+  // pointer entropy = velocity, so the visuals track how fast the mouse moves
+  ptrS.bps = Math.min(ptr.speed * 0.8, ptrS.max);
+  ptrS.lastSample = t;
+  Pool.add((((x * 2654435761) ^ (y * 40503) ^ ((t * 1000) | 0) ^ ((ptr.speed * 97) | 0)) >>> 0));
 }, { passive: true });
 addEventListener('pointerdown', e => {
   if (!ptrS.enabled) return;
   const t = performance.now();
-  ptrS.bps = ptrS.est.note(t);
-  Pool.add(((e.clientX * 40503) ^ ((t * 1000) | 0)) >>> 0);
+  const x = e.clientX, y = e.clientY;
+  ptr.lx = x; ptr.ly = y; ptr.lt = t; ptr.x = x; ptr.y = y;
+  ptrS.bps = Math.min(ptr.speed * 0.8 + 200, ptrS.max);
+  ptrS.lastSample = t;
+  Pool.add((((x * 40503) ^ ((t * 1000) | 0)) >>> 0));
 }, { passive: true });
 
 addEventListener('keydown', e => {
   if (keyS.enabled) {
     const t = performance.now();
     keyS.bps = keyS.est.note(t);
+    keyS.lastSample = t;
     Pool.add(((e.keyCode * 40503) ^ ((t * 1000) | 0)) >>> 0);
   }
   if (e.key === 'h') { $('#hud').classList.toggle('hidden'); }
   else if (e.key === 'p') { togglePause(); }
-  else if (e.key >= '1' && e.key <= '4') { setMode(MODES[+e.key - 1]); }
+  else if (e.key >= '1' && e.key <= '3') { setMode(MODES[+e.key - 1]); }
 });
 
 // CPU load probe
@@ -385,6 +399,7 @@ setInterval(() => {
   const load = clamp(1 - c / cpuRef, 0, 1);
   cpuS.value = cpuS.value * 0.6 + load * 0.4 * 100;
   cpuS.bps = cpuS.value * 30;
+  cpuS.lastSample = t0;
   Pool.add((c ^ ((t0 * 1000) | 0)) >>> 0);
 }, 1000);
 
@@ -397,6 +412,7 @@ setInterval(() => {
   const dt = Math.max(performance.now() - t0, 0.05);
   rngS.value = rngS.value * 0.7 + (arr.length / 1048576 / (dt / 1000)) * 0.3;
   rngS.bps = 800;
+  rngS.lastSample = t0;
   Pool.addBytes(arr);
 }, 500);
 
@@ -408,6 +424,7 @@ function netPing() {
     if (!netS.enabled) return;
     const dt = performance.now() - t0;
     netS.bps = netS.est.note(performance.now());
+    netS.lastSample = performance.now();
     Pool.add((Math.round(dt * 1000) >>> 0) ^ 0x7e4a);
     setTimeout(netPing, 1200 + prng() * 1800);
   };
@@ -422,6 +439,7 @@ if (navigator.getBattery) {
     const upd = () => {
       batS.value = b.level * 100;
       batS.bps = 30;
+      batS.lastSample = performance.now();
       Pool.add((((b.level * 1000) | 0) ^ (b.charging ? 0x5a5a : 0xa5a5)) >>> 0);
     };
     upd();
@@ -494,14 +512,14 @@ function sysLine() {
     ' \u00b7 ' + (devicePixelRatio || 1).toFixed(1) + '\u00d7 \u00b7 ' + W + '\u00d7' + H;
 }
 setInterval(() => {
-  // decay any estimator whose source has gone quiet, so visuals freeze shortly
-  // after input stops (a rate is only real while samples keep arriving)
+  // decay any source that has gone quiet, so visuals freeze shortly after input
+  // stops (a rate is only real while samples keep arriving)
   const nowMs = performance.now();
   for (const s of srcList) {
-    if (s.est && s.est.last != null && nowMs - s.est.last > 150) {
-      const f = Math.pow(0.5, (nowMs - s.est.last) / 400);
-      s.est.bps *= f;
-      s.bps = s.est.bps;
+    if (s.lastSample != null && nowMs - s.lastSample > 150) {
+      const f = Math.pow(0.5, (nowMs - s.lastSample) / 400);
+      s.bps *= f;
+      if (s.est) s.est.bps = s.bps;
     }
   }
   let total = 0;
@@ -525,9 +543,8 @@ setInterval(() => {
 }, 250);
 
 /* ================= generation ================= */
-const MODES = ['grid', 'particles', 'noise', 'rain'];
-let mode = 'grid';
-let gridAcc = 0;
+const MODES = ['noise', 'particles', 'rain'];
+let mode = 'noise';
 
 function togglePause() {
   paused = !paused;
@@ -536,8 +553,8 @@ function togglePause() {
 }
 
 function resetGeneration() {
-  genT = 0; genProgress = 0; gridAcc = 0;
-  gridReset(); partReset(); rainReset(); grainReset();
+  genT = 0; genProgress = 0;
+  partReset(); rainReset(); grainReset();
 }
 function completeGeneration() {
   flash = Math.max(flash, 0.9);
@@ -549,112 +566,6 @@ function setMode(m) {
   flash = Math.max(flash, 0.3);
   resetGeneration();
 }
-
-/* ================= grid mode ================= */
-const NB = [[1,0],[-1,0],[0,1],[0,-1]];
-const grid = { cells: new Map(), frontier: [], cell: 0, ox: 0, oy: 0, n: 24, side: 0 };
-function gridLayout() {
-  grid.n = (W * H < 360 * 640) ? 20 : 24;
-  grid.side = Math.min(W, H) * 0.86;
-  grid.cell = grid.side / grid.n;
-  grid.ox = (W - grid.side) / 2;
-  grid.oy = (H - grid.side) / 2;
-}
-function gridReset() {
-  grid.cells.clear(); grid.frontier.length = 0;
-  // seed the center so the grid is alive immediately
-  const c0 = (grid.n / 2) | 0, r0 = (grid.n / 2) | 0;
-  const seeds = [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
-  for (const [dc, dr] of seeds) {
-    const c = c0 + dc, r = r0 + dr;
-    if (c >= 0 && c < grid.n && r >= 0 && r < grid.n) grid._add(r * grid.n + c, c, r);
-  }
-}
-function rebuildFrontier() {
-  grid.frontier.length = 0;
-  const n = grid.n;
-  for (const key of grid.cells.keys()) {
-    const r = (key / n) | 0, c = key % n;
-    for (const [nc, nr] of NB) {
-      if (nc >= 0 && nc < n && nr >= 0 && nr < n && !grid.cells.has(nr * n + nc)) grid.frontier.push(nr * n + nc);
-    }
-  }
-}
-function gridBirth() {
-  const n = grid.n, total = n * n;
-  if (grid.cells.size >= total) return;
-  if (grid.frontier.length > total * 2) rebuildFrontier();
-  let c, r;
-  if (grid.frontier.length && prng() < 0.8) {
-    for (let t = 0; t < 10; t++) {
-      const i = (prng() * grid.frontier.length) | 0;
-      const key = grid.frontier[i];
-      if (!grid.cells.has(key)) {
-        grid.frontier[i] = grid.frontier[grid.frontier.length - 1];
-        grid.frontier.pop();
-        r = (key / n) | 0; c = key % n;
-        grid._add(key, c, r);
-        return;
-      }
-    }
-  }
-  for (let t = 0; t < 50; t++) {
-    const key = (prng() * total) | 0;
-    if (!grid.cells.has(key)) { r = (key / n) | 0; c = key % n; grid._add(key, c, r); return; }
-  }
-  for (let key = 0; key < total; key++) {
-    if (!grid.cells.has(key)) { r = (key / n) | 0; c = key % n; grid._add(key, c, r); return; }
-  }
-}
-grid._add = function (key, c, r) {
-  const n = this.n;
-  const hue = Math.round(((c / n) * 0.55 + (r / n) * 0.45) * 360 + E * 140 + prng() * 14);
-  const L = 42 + prng() * 30 + E * 12;
-  this.cells.set(key, { key, fill: 'hsl(' + hue + ',90%,' + L.toFixed(0) + '%)', born: performance.now() / 1000, life: 12 });
-  for (const [nc, nr] of NB) {
-    if (nc >= 0 && nc < n && nr >= 0 && nr < n && !this.cells.has(nr * n + nc)) this.frontier.push(nr * n + nc);
-  }
-};
-function gridTick() {
-  const total = grid.n * grid.n;
-  const remaining = total - grid.cells.size;
-  if (remaining <= 0) return;
-  const perTick = Math.max(1, Math.ceil(total / (genDuration * 10)));
-  const count = Math.min(perTick, remaining);
-  for (let i = 0; i < count; i++) gridBirth();
-}
-function drawGrid() {
-  const t = performance.now() / 1000;
-  ctx.fillStyle = '#020408'; ctx.fillRect(0, 0, W, H);
-  const n = grid.n, cell = grid.cell, ox = grid.ox, oy = grid.oy, side = grid.side;
-  ctx.strokeStyle = 'rgba(120,240,200,.05)'; ctx.lineWidth = 1;
-  ctx.fillStyle = '#050b12'; ctx.fillRect(ox, oy, side, side);
-  ctx.beginPath();
-  for (let i = 0; i <= n; i++) {
-    const x = ox + i * cell;
-    ctx.moveTo(x, oy); ctx.lineTo(x, oy + side);
-    const y = oy + i * cell;
-    ctx.moveTo(ox, y); ctx.lineTo(ox + side, y);
-  }
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(140,255,220,.45)'; ctx.strokeRect(ox, oy, side, side);
-  const pad = cell * 0.08;
-  for (const v of grid.cells.values()) {
-    const age = t - v.born;
-    const a = clamp(1 - age / v.life, 0, 1);
-    const fresh = age < 0.6 ? 1 - age / 0.6 : 0;
-    const x = ox + (v.key % n) * cell, y = oy + ((v.key / n) | 0) * cell;
-    ctx.globalAlpha = 0.15 + 0.85 * a;
-    ctx.fillStyle = v.fill;
-    ctx.fillRect(x + pad, y + pad, cell - 2 * pad, cell - 2 * pad);
-    if (fresh > 0.05) {
-      ctx.globalAlpha = fresh * 0.45;
-      ctx.fillRect(x - pad * 0.6, y - pad * 0.6, cell + pad * 1.2, cell + pad * 1.2);
-    }
-  }
-  ctx.globalAlpha = 1;
-}
-
 /* ================= particles mode ================= */
 const part = {
   max: 1000, n: 0,
@@ -702,7 +613,7 @@ function drawParticles() {
 }
 
 /* ================= noise mode ================= */
-const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null, order: null, ptr: 0 };
+const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null };
 // precomputed RGB palette covering the full hue wheel (index = byte value)
 const grainPal = new Uint8ClampedArray(256 * 3);
 for (let i = 0; i < 256; i++) {
@@ -727,19 +638,16 @@ function grainInit() {
   grain.cv.width = grain.cw; grain.cv.height = grain.ch;
   grain.gctx = grain.cv.getContext('2d');
   grain.img = grain.gctx.createImageData(grain.cw, grain.ch);
-  // shuffled visit order so partial re-rolls cover the whole field evenly
-  const len = grain.cw * grain.ch;
-  grain.order = new Uint32Array(len);
-  for (let i = 0; i < len; i++) grain.order[i] = i;
-  for (let i = len - 1; i > 0; i--) {
-    const j = (prng() * (i + 1)) | 0;
-    const t = grain.order[i]; grain.order[i] = grain.order[j]; grain.order[j] = t;
-  }
-  grain.ptr = 0;
-  fillGrain();
+  fillGrain(true); // the initial noise is full black; entropy paints the canvas
 }
-function fillGrain() {
+function fillGrain(black) {
   const d = grain.img.data;
+  if (black) {
+    d.fill(0);
+    for (let i = 3; i < d.length; i += 4) d[i] = 255;
+    grain.gctx.putImageData(grain.img, 0, 0);
+    return;
+  }
   const buf = Pool.getBytes(grain.cw * grain.ch * 2); // bytes come from the harvested pool
   for (let i = 0; i < grain.cw * grain.ch; i++) {
     const h = buf[i * 2], f = 0.45 + 0.55 * (buf[i * 2 + 1] / 255);
@@ -748,17 +656,30 @@ function fillGrain() {
   }
   grain.gctx.putImageData(grain.img, 0, 0);
 }
-function grainReset() { fillGrain(); }
+function grainReset() { fillGrain(true); } // each generation starts black
 function tickGrain(frac) {
   const len = grain.cw * grain.ch;
   const k = Math.max(1, Math.round(len * frac));
   const buf = Pool.getBytes(k * 2); // bytes come from the harvested pool
-  const rot = ((nowT * 20 * E) | 0) % 256; // hue sweep scales with entropy: 0 when all sources off
+  // horizontal cursor position sets the global color phase; entropy sweeps it over time
+  const rot = (((ptr.x >= 0 ? ptr.x / W : 0) * 256 + nowT * 20 * E) | 0) % 256;
+  // the static boils in a patch around the cursor; the patch grows with velocity
+  const gx0 = (ptr.x / W) * grain.cw, gy0 = (ptr.y / H) * grain.ch;
+  const gr = clamp((40 + ptr.speed * 0.06) * (grain.cw / W), 1, grain.cw * 0.4);
   const data = grain.img.data;
   let bi = 0;
   for (let j = 0; j < k; j++) {
-    grain.ptr = (grain.ptr + 1) % len;
-    const idx = grain.order[grain.ptr];
+    let px, py;
+    if (ptr.x >= 0 && prng() < 0.75) {
+      const ang = prng() * Math.PI * 2;
+      const r = gr * Math.sqrt(prng());
+      px = ((gx0 + Math.cos(ang) * r) % grain.cw + grain.cw) % grain.cw;
+      py = ((gy0 + Math.sin(ang) * r) % grain.ch + grain.ch) % grain.ch;
+    } else {
+      px = (prng() * grain.cw) | 0;
+      py = (prng() * grain.ch) | 0;
+    }
+    const idx = py * grain.cw + px;
     const h = (buf[bi++] + rot) % 256;
     const f = 0.7 + 0.3 * (buf[bi++] / 255);
     const p = h * 3, o = idx * 4;
@@ -838,7 +759,7 @@ function resize() {
   canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  gridLayout(); grainInit(); rainInit(); partAdapt();
+  grainInit(); rainInit(); partAdapt();
   $('#sysline').textContent = sysLine();
 }
 addEventListener('resize', resize);
@@ -855,11 +776,7 @@ function frame(now) {
   if (genT >= genDuration) completeGeneration();
   genProgress = genT / genDuration;
   progressEl.style.width = (genProgress * 100) + '%';
-  if (mode === 'grid') {
-    gridAcc += dt;
-    while (gridAcc >= 0.1) { gridAcc -= 0.1; gridTick(); }
-    drawGrid();
-  } else if (mode === 'particles') {
+  if (mode === 'particles') {
     updateParticles(dt);
     drawParticles();
   } else if (mode === 'noise') {
