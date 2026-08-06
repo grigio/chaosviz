@@ -675,7 +675,7 @@ for (let i = 0; i < 256; i++) {
   grainPal[i * 3 + 2] = Math.round((b + m) * 255);
 }
 function grainInit() {
-  if (W < 600) { grain.cw = 192; grain.ch = 108; } else { grain.cw = 224; grain.ch = 126; }
+  if (W < 600) { grain.cw = 256; grain.ch = 144; } else { grain.cw = 320; grain.ch = 180; }
   grain.cv = document.createElement('canvas');
   grain.cv.width = grain.cw; grain.cv.height = grain.ch;
   grain.gctx = grain.cv.getContext('2d');
