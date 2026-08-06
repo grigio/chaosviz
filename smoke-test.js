@@ -166,6 +166,19 @@ if (!failed) {
   }
 }
 
+// verify the grain palette spans the full hue wheel (noise view full color range)
+if (!failed) {
+  try {
+    const palCheck = vm.runInContext('(function(){ let maxH=0, seen=[]; for(let i=0;i<256;i++){ const p=i*3; const r=grainPal[p], g=grainPal[p+1], b=grainPal[p+2]; const mx=Math.max(r,g,b), mn=Math.min(r,g,b); let h; if(mx===mn) h=0; else if(mx===r) h=60*(((g-b)/(mx-mn))%6); else if(mx===g) h=60*((b-r)/(mx-mn)+2); else h=60*((r-g)/(mx-mn)+4); if(h<0) h+=360; seen[Math.floor(h/30)]=true; } return seen.filter(Boolean).length; })()', sandbox);
+    if (palCheck >= 12) {
+      console.log('GRAIN PALETTE OK (all 12 hue sectors covered)');
+    } else {
+      console.error('GRAIN PALETTE FAILED: only ' + palCheck + ' hue sectors covered');
+      failed = true;
+    }
+  } catch (e) { console.error('GRAIN PALETTE CHECK ERROR:', e.message); failed = true; }
+}
+
 // verify grid actually populated during its time in grid mode (frames 0-100)
 if (!failed) {
   try {
