@@ -361,6 +361,8 @@ addEventListener('pointermove', e => {
   ptrS.bps = Math.min(ptr.speed * 0.8, ptrS.max);
   ptrS.lastSample = t;
   Pool.add((((x * 2654435761) ^ (y * 40503) ^ ((t * 1000) | 0) ^ ((ptr.speed * 97) | 0)) >>> 0));
+  // paint colored squares directly on the canvas along the pointer path
+  paintAt(x, y, 0);
 }, { passive: true });
 addEventListener('pointerdown', e => {
   if (!ptrS.enabled) return;
@@ -370,6 +372,7 @@ addEventListener('pointerdown', e => {
   ptrS.bps = Math.min(ptr.speed * 0.8 + 200, ptrS.max);
   ptrS.lastSample = t;
   Pool.add((((x * 40503) ^ ((t * 1000) | 0)) >>> 0));
+  paintAt(x, y, 1.6); // clicking leaves a bigger splat
 }, { passive: true });
 
 addEventListener('keydown', e => {
@@ -696,21 +699,7 @@ function tickGrain(frac) {
       py = (prng() * grain.ch) | 0;
     }
     const idx = py * grain.cw + px;
-    if (eatArt) {
-      // this colored square covers a square region of the art layer: erase it there
-      const x0 = Math.max(0, Math.floor(grain.ox + px * grain.scale));
-      const y0 = Math.max(0, Math.floor(grain.oy + py * grain.scale));
-      const x1 = Math.min(W, Math.ceil(grain.ox + (px + 1) * grain.scale));
-      const y1 = Math.min(H, Math.ceil(grain.oy + (py + 1) * grain.scale));
-      art.ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
-      const bm = art.bitmap;
-      for (let ay = y0; ay < y1; ay++) {
-        const row = ay * W;
-        for (let ax = x0; ax < x1; ax++) {
-          if (bm[row + ax]) { bm[row + ax] = 0; art.remaining--; }
-        }
-      }
-    }
+    if (eatArt) eraseArtAt(px, py);
     const h = (buf[bi++] + rot) % 256;
     const f = 0.7 + 0.3 * (buf[bi++] / 255);
     const p = h * 3, o = idx * 4;
@@ -720,6 +709,51 @@ function tickGrain(frac) {
     data[o + 3] = 255;
   }
   grain.gctx.putImageData(grain.img, 0, 0);
+}
+
+/* ---------- direct painting: the pointer draws colored squares on the canvas ---------- */
+function eraseArtAt(px, py) {
+  // this colored square covers a square region of the art layer: erase it there
+  const x0 = Math.max(0, Math.floor(grain.ox + px * grain.scale));
+  const y0 = Math.max(0, Math.floor(grain.oy + py * grain.scale));
+  const x1 = Math.min(W, Math.ceil(grain.ox + (px + 1) * grain.scale));
+  const y1 = Math.min(H, Math.ceil(grain.oy + (py + 1) * grain.scale));
+  art.ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
+  const bm = art.bitmap;
+  for (let ay = y0; ay < y1; ay++) {
+    const row = ay * W;
+    for (let ax = x0; ax < x1; ax++) if (bm[row + ax]) { bm[row + ax] = 0; art.remaining--; }
+  }
+}
+function writeGrainCell(px, py, rot, bright) {
+  const cw = grain.cw, ch = grain.ch;
+  px = ((px % cw) + cw) % cw;
+  py = ((py % ch) + ch) % ch;
+  const idx = py * cw + px;
+  const h = (((prng() * 256) | 0) + rot) % 256;
+  const f = 0.5 + 0.5 * bright * (0.7 + 0.3 * prng());
+  const p = h * 3, o = idx * 4, d = grain.img.data;
+  d[o] = grainPal[p] * f; d[o + 1] = grainPal[p + 1] * f; d[o + 2] = grainPal[p + 2] * f; d[o + 3] = 255;
+  if (art.remaining > 0 && nowT >= art.holdUntil) eraseArtAt(px, py);
+}
+function paintBrush(gx, gy, speed, boost) {
+  const r = clamp(0.6 + (speed * 0.0012 + (boost || 0)) * 1.4, 0.6, 4.5); // brush radius in grain cells
+  const bright = 0.55 + 0.45 * Math.min(1, speed / 1600);
+  const rot = (((ptr.x >= 0 ? ptr.x / W : 0) * 256) | 0) % 256;
+  const n = Math.max(1, Math.round(r * r * Math.PI * (0.6 + 0.4 * Math.min(1, speed / 1600))));
+  for (let i = 0; i < n; i++) {
+    const ang = prng() * Math.PI * 2;
+    const rad = r * Math.sqrt(prng());
+    writeGrainCell(Math.round(gx + Math.cos(ang) * rad), Math.round(gy + Math.sin(ang) * rad), rot, bright);
+  }
+  grain.gctx.putImageData(grain.img, 0, 0);
+}
+function paintAt(sx, sy, boost) {
+  if (!grain.scale) return; // screen geometry not ready yet
+  const gx = (sx - grain.ox) / grain.scale;
+  const gy = (sy - grain.oy) / grain.scale;
+  if (!isFinite(gx) || !isFinite(gy)) return;
+  paintBrush(gx, gy, ptr.speed, boost);
 }
 
 /* ---------- CHAOS art: white art eaten by arriving colored squares ---------- */

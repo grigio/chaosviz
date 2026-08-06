@@ -333,6 +333,9 @@ if (!failed) {
   try {
     vm.runInContext('mode = "noise"; srcList.forEach(s => s.enabled = false); SRC.pointer.enabled = true; E = 0', sandbox);
     const hudTicks = intervals.filter(iv => iv.ms === 250);
+    // snapshot before any movement: with no frames running, only direct painting
+    // can change the grain, so any difference proves the pointer paints on canvas
+    const paintBefore = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
     // move the mouse: 300 events with realistic jittered timing, HUD ticks every 12 events
     for (let i = 0; i < 300; i++) {
       clock.t += 8 + (i % 5); // jittered inter-event gap, like a real mouse
@@ -340,6 +343,10 @@ if (!failed) {
       if (i % 12 === 0) { clock.t += 250; hudTicks.forEach(iv => { try { iv.fn(); } catch (e) {} }); }
     }
     clock.t += 250; hudTicks.forEach(iv => { try { iv.fn(); } catch (e) {} });
+    const paintAfter = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    const painted = paintAfter !== paintBefore;
+    if (!painted) { console.error('POINTER PAINT FAILED: grain unchanged after mouse movement'); failed = true; }
+    else console.log('POINTER PAINT OK (direct colored squares left on canvas)');
     const eHigh = vm.runInContext('E', sandbox);
     const pbHigh = vm.runInContext('SRC.pointer.bps', sandbox);
     // mouse stops: advance the clock through decay ticks only (field untouched)
