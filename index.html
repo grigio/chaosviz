@@ -508,7 +508,7 @@ function togglePause() {
 
 function resetGeneration() {
   genT = 0; genProgress = 0; gridAcc = 0;
-  gridReset(); partReset(); rainReset();
+  gridReset(); partReset(); rainReset(); grainReset();
 }
 function completeGeneration() {
   flash = Math.max(flash, 0.9);
@@ -673,7 +673,7 @@ function drawParticles() {
 }
 
 /* ================= noise mode ================= */
-const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null };
+const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null, order: null, ptr: 0 };
 // precomputed RGB palette covering the full hue wheel (index = byte value)
 const grainPal = new Uint8ClampedArray(256 * 3);
 for (let i = 0; i < 256; i++) {
@@ -698,6 +698,16 @@ function grainInit() {
   grain.cv.width = grain.cw; grain.cv.height = grain.ch;
   grain.gctx = grain.cv.getContext('2d');
   grain.img = grain.gctx.createImageData(grain.cw, grain.ch);
+  // shuffled visit order so partial re-rolls cover the whole field evenly
+  const len = grain.cw * grain.ch;
+  grain.order = new Uint32Array(len);
+  for (let i = 0; i < len; i++) grain.order[i] = i;
+  for (let i = len - 1; i > 0; i--) {
+    const j = (prng() * (i + 1)) | 0;
+    const t = grain.order[i]; grain.order[i] = grain.order[j]; grain.order[j] = t;
+  }
+  grain.ptr = 0;
+  fillGrain();
 }
 function fillGrain() {
   const d = grain.img.data;
@@ -709,27 +719,33 @@ function fillGrain() {
   }
   grain.gctx.putImageData(grain.img, 0, 0);
 }
+function grainReset() { fillGrain(); }
+function tickGrain(frac) {
+  const len = grain.cw * grain.ch;
+  const k = Math.max(1, Math.round(len * frac));
+  const buf = crBytes(k * 2);
+  const rot = ((nowT * 20) | 0) % 256; // slow sweep through the whole wheel
+  const data = grain.img.data;
+  let bi = 0;
+  for (let j = 0; j < k; j++) {
+    grain.ptr = (grain.ptr + 1) % len;
+    const idx = grain.order[grain.ptr];
+    const h = (buf[bi++] + rot) % 256;
+    const f = 0.7 + 0.3 * (buf[bi++] / 255);
+    const p = h * 3, o = idx * 4;
+    data[o] = grainPal[p] * f;
+    data[o + 1] = grainPal[p + 1] * f;
+    data[o + 2] = grainPal[p + 2] * f;
+    data[o + 3] = 255;
+  }
+  grain.gctx.putImageData(grain.img, 0, 0);
+}
 function drawNoise() {
-  ctx.fillStyle = '#04070c'; ctx.fillRect(0, 0, W, H);
-  const T = E, t2 = nowT * 0.2;
-  // drifting blobs whose hues sweep the full wheel with time and entropy
-  const b1x = W * (0.5 + 0.35 * Math.sin(t2)), b1y = H * (0.5 + 0.35 * Math.cos(t2 * 1.3));
-  const b2x = W * (0.5 + 0.35 * Math.cos(t2 * 0.9)), b2y = H * (0.5 + 0.3 * Math.sin(t2 * 1.1 + 2));
-  const h1 = (nowT * 24 + T * 360) % 360;
-  const h2 = (nowT * 36 + 120 + T * 240) % 360;
-  ctx.globalAlpha = 0.16 + T * 0.16;
-  const r1 = Math.max(W, H) * 0.5, r2 = Math.max(W, H) * 0.4;
-  const g1 = ctx.createRadialGradient(b1x, b1y, 0, b1x, b1y, r1);
-  g1.addColorStop(0, 'hsla(' + Math.round(h1) + ',90%,50%,0.55)'); g1.addColorStop(1, 'rgba(0,0,0,0)');
-  const g2 = ctx.createRadialGradient(b2x, b2y, 0, b2x, b2y, r2);
-  g2.addColorStop(0, 'hsla(' + Math.round(h2) + ',85%,45%,0.5)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 1;
-  // full-spectrum colored static, always clearly visible
-  if (prng() < 0.4 + T * 2.4) fillGrain();
+  // full-opacity, full-spectrum colored static; entropy controls how fast it boils
+  const T = E;
+  tickGrain(Math.min(0.8, 0.2 + T * 0.7));
   ctx.imageSmoothingEnabled = false;
-  ctx.globalAlpha = 0.15 + T * 0.2;
+  ctx.globalAlpha = 1;
   ctx.drawImage(grain.cv, 0, 0, W, H);
   ctx.globalAlpha = 1;
   ctx.imageSmoothingEnabled = true;
