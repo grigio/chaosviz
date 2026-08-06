@@ -678,6 +678,10 @@ function tickGrain(frac) {
   const gx0 = (ptr.x / W) * grain.cw, gy0 = (ptr.y / H) * grain.ch;
   const gr = clamp((40 + ptr.speed * 0.06) * (grain.cw / W), 1, grain.cw * 0.4);
   const data = grain.img.data;
+  // colored pixels that land on the CHAOS art erase it: the art disappears
+  // because new colored squares come, not on its own
+  const eatArt = art.remaining > 0 && nowT >= art.holdUntil;
+  const cellW = Math.ceil(W / grain.cw), cellH = Math.ceil(H / grain.ch);
   let bi = 0;
   for (let j = 0; j < k; j++) {
     let px, py;
@@ -691,6 +695,19 @@ function tickGrain(frac) {
       py = (prng() * grain.ch) | 0;
     }
     const idx = py * grain.cw + px;
+    if (eatArt) {
+      // this colored square covers a region of the art layer: erase it there
+      const x0 = (px * W / grain.cw) | 0, y0 = (py * H / grain.ch) | 0;
+      const x1 = Math.min(W, x0 + cellW), y1 = Math.min(H, y0 + cellH);
+      art.ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
+      const bm = art.bitmap;
+      for (let ay = y0; ay < y1; ay++) {
+        const row = ay * W;
+        for (let ax = x0; ax < x1; ax++) {
+          if (bm[row + ax]) { bm[row + ax] = 0; art.remaining--; }
+        }
+      }
+    }
     const h = (buf[bi++] + rot) % 256;
     const f = 0.7 + 0.3 * (buf[bi++] / 255);
     const p = h * 3, o = idx * 4;
@@ -702,9 +719,9 @@ function tickGrain(frac) {
   grain.gctx.putImageData(grain.img, 0, 0);
 }
 
-/* ---------- CHAOS art: full-res white art that deteriorates as entropy arrives ---------- */
-const ART_HOLD_S = 1.0; // seconds the fresh art is protected from deterioration
-const art = { cv: null, ctx: null, img: null, mask: null, left: 0, holdUntil: 0 };
+/* ---------- CHAOS art: white art eaten by arriving colored squares ---------- */
+const ART_HOLD_S = 1.0; // fresh art is protected from colored squares for a moment
+const art = { cv: null, ctx: null, img: null, bitmap: null, remaining: 0, holdUntil: 0 };
 function artReset() {
   if (!art.cv) {
     art.cv = document.createElement('canvas');
@@ -722,40 +739,27 @@ function artReset() {
   const top = H / 2 - (CHAOS_ART.length * lineH) / 2 + fs * 0.35;
   for (let i = 0; i < CHAOS_ART.length; i++) art.ctx.fillText(CHAOS_ART[i], W / 2, top + i * lineH);
   art.ctx.restore();
-  // snapshot the art pixels so they can be erased one at a time (deterioration)
+  // bitmap of surviving art pixels; colored squares zero out the cells they cover
   art.img = art.ctx.getImageData(0, 0, W, H);
-  art.mask = [];
+  const bm = art.bitmap = new Uint8Array(W * H);
   const d = art.img.data;
-  for (let i = 0; i < d.length; i += 4) if (d[i] > 100 || d[i + 1] > 100 || d[i + 2] > 100) art.mask.push(i >> 2);
-  // shuffle so decay eats the letters at random, not in scan order
-  for (let i = art.mask.length - 1; i > 0; i--) {
-    const j = (prng() * (i + 1)) | 0;
-    const t = art.mask[i]; art.mask[i] = art.mask[j]; art.mask[j] = t;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] > 100 || d[i + 1] > 100 || d[i + 2] > 100) { bm[i >> 2] = 1; n++; }
   }
-  art.left = art.mask.length;
+  art.remaining = n;
   art.holdUntil = nowT + ART_HOLD_S;
-}
-function artDeteriorate() {
-  if (!art.mask || art.left === 0 || nowT < art.holdUntil) return;
-  // erase a fraction of the remaining art pixels per frame; entropy speeds decay
-  const frac = Math.min(0.3, 0.015 + E * 0.3);
-  const n = Math.max(1, Math.round(art.left * frac));
-  for (let i = 0; i < n && art.left > 0; i++) {
-    const idx = art.mask[--art.left];
-    art.ctx.clearRect(idx % W, (idx / W) | 0, 2, 2);
-  }
 }
 function drawNoise() {
   // full-opacity, full-spectrum colored static; entropy drives the boil rate.
-  // The white CHAOS art sits on top and deteriorates pixel by pixel as entropy
-  // flows in, until it is gone for this generation.
+  // The white CHAOS art sits on top; each colored square that lands on it
+  // erases that part, so the art deteriorates exactly where new pixels arrive.
   if (E > 0.005) tickGrain(Math.min(0.8, 0.2 + E * 0.7));
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
   ctx.drawImage(grain.cv, 0, 0, W, H);
   ctx.imageSmoothingEnabled = true;
-  artDeteriorate();
-  if (art.left > 0) ctx.drawImage(art.cv, 0, 0, W, H);
+  if (art.remaining > 0) ctx.drawImage(art.cv, 0, 0, W, H);
   ctx.globalAlpha = 1;
 }
 /* ================= rain mode ================= */

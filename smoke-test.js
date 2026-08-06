@@ -196,7 +196,7 @@ if (!failed) {
     for (let i = 0; i < 3; i++) rafCb(performance.now() + i * 16.6);
     const artCount = fillTexts.filter(a => String(a[0]).length > 20).length; // art lines are 41 chars; rain glyphs are 1
     const whiteUsed = ctxStyles.includes('#ffffff');
-    const leftFresh = vm.runInContext('art.left', sandbox);
+    const leftFresh = vm.runInContext('art.remaining', sandbox);
     if (artCount >= 5 && whiteUsed && leftFresh > 0) {
       console.log('NOISE CHAOS ART OK (' + artCount + ' ASCII lines, ' + leftFresh + ' art pixels, white)');
     } else {
@@ -291,18 +291,18 @@ if (!failed) {
 if (!failed) {
   try {
     vm.runInContext('mode = "noise"; artReset(); E = 0.5', sandbox);
-    const leftFresh = vm.runInContext('art.left', sandbox);
+    const leftFresh = vm.runInContext('art.remaining', sandbox);
     const baseT = performance.now();
     // inside the hold window the art is untouched even at high entropy
     for (let i = 0; i < 10; i++) rafCb(baseT + i * 16.6);
-    const leftHold = vm.runInContext('art.left', sandbox);
+    const leftHold = vm.runInContext('art.remaining', sandbox);
     // past the hold window the art erodes frame by frame until it is gone
     for (let i = 0; i < 150; i++) rafCb(baseT + 4000 + i * 16.6);
-    const leftAfter = vm.runInContext('art.left', sandbox);
+    const leftAfter = vm.runInContext('art.remaining', sandbox);
     const holdOK = leftHold === leftFresh;
-    const eroded = leftAfter === 0;
+    const eroded = leftAfter < leftFresh / 2; // pixels landing erased a big share
     if (leftFresh > 0 && holdOK && eroded) {
-      console.log('NOISE CHAOS DETERIORATE OK (' + leftFresh + ' -> hold ' + leftHold + ' -> 0)');
+      console.log('NOISE CHAOS DETERIORATE OK (' + leftFresh + ' -> hold ' + leftHold + ' -> ' + leftAfter + ')');
     } else {
       console.error('NOISE CHAOS DETERIORATE FAILED: fresh=' + leftFresh + ' hold=' + leftHold + ' after=' + leftAfter);
       failed = true;
