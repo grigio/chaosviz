@@ -564,9 +564,10 @@ function chaosReset() {
 function updateChaos(dt) {
   if (!chaos.n) return;
   const T = E;
-  // release anchored art particles as entropy flows (the CHAOS dissolves)
-  if (nowT >= art.holdUntil) {
-    const nRel = Math.max(1, Math.round(chaos.n * Math.min(1, (0.02 + T * 0.5) * dt)));
+  // release anchored art particles as entropy flows (the CHAOS dissolves);
+  // with no entropy nothing is released
+  if (nowT >= art.holdUntil && T > 0.005) {
+    const nRel = Math.max(1, Math.round(chaos.n * Math.min(1, T * 0.5 * dt)));
     for (let r = 0; r < nRel; r++) {
       const idx = (prng() * chaos.n) | 0;
       if (!chaos.free[idx]) {
@@ -576,7 +577,8 @@ function updateChaos(dt) {
       }
     }
   }
-  const jx = 0.25 + T * 2.2, flow = 0.5 + T * 1.6;
+  const jx = T * 2.2, flow = T * 1.6;
+  if (T <= 0.005) return; // no entropy: released particles freeze in place
   for (let i = 0; i < chaos.n; i++) {
     if (!chaos.free[i]) continue;
     const x = chaos.x[i], y = chaos.y[i];
@@ -622,8 +624,10 @@ function partSpawnAt(sx, sy, boost) {
   }
 }
 function updateParticles(dt) {
+  const T = E;
+  // with every source disabled nothing moves and no new particles spawn
   const target = Math.min(Math.round(part.max * genProgress), part.max);
-  if (part.n < target) {
+  if (T > 0.005 && part.n < target) {
     const add = Math.min(target - part.n, Math.max(1, Math.ceil(part.max * dt / genDuration) + 1));
     for (let i = 0; i < add; i++) {
       const idx = part.n++;
@@ -631,9 +635,9 @@ function updateParticles(dt) {
       part.vx[idx] = (prng() - 0.5) * 2; part.vy[idx] = (prng() - 0.5) * 2;
       part.ph[idx] = prng();
     }
-  } else if (part.n > target) part.n = target;
-  const T = E;
-  const jx = 0.25 + T * 2.2, flow = 0.5 + T * 1.6;
+  } else if (T > 0.005 && part.n > target) part.n = target;
+  if (T <= 0.005) return; // no entropy: particles freeze in place
+  const jx = T * 2.2, flow = T * 1.6;
   for (let i = 0; i < part.n; i++) {
     const x = part.x[i], y = part.y[i];
     const fx = Math.sin(x * 0.004 + nowT * 0.5) + Math.cos(y * 0.003 - nowT * 0.4);

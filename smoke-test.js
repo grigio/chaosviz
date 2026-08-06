@@ -369,6 +369,31 @@ if (!failed) {
   } catch (e) { console.error('PARTICLES CHAOS CHECK ERROR:', e.message); failed = true; }
 }
 
+// with every source disabled the particles must not move
+if (!failed) {
+  try {
+    vm.runInContext('mode = "particles"; genDuration = 1000; artReset(); partReset(); chaosReset(); partSpawnAt(300, 300, 3); partSpawnAt(400, 300, 3)', sandbox);
+    // let entropy move them for a bit
+    vm.runInContext('E = 0.5', sandbox);
+    for (let i = 0; i < 20; i++) rafCb(performance.now() + 4000 + i * 16.6);
+    // disable everything and let E decay (no frames yet)
+    vm.runInContext('srcList.forEach(s => s.enabled = false)', sandbox);
+    for (let i = 0; i < 30; i++) runIntervals();
+    const eVal = vm.runInContext('E', sandbox);
+    const snap = () => vm.runInContext('JSON.stringify(Array.from(part.x).slice(0, part.n).concat(Array.from(part.y).slice(0, part.n)).concat(Array.from(chaos.x).slice(0, chaos.n)).concat(Array.from(chaos.y).slice(0, chaos.n)))', sandbox);
+    const p1 = snap();
+    for (let i = 0; i < 40; i++) rafCb(performance.now() + 8000 + i * 16.6);
+    const p2 = snap();
+    if (eVal < 0.005 && p1 === p2) {
+      console.log('PARTICLES FROZEN OK (E=' + eVal.toExponential(1) + ', positions unchanged)');
+    } else {
+      console.error('PARTICLES FROZEN FAILED: E=' + eVal + ' changed=' + (p1 !== p2));
+      failed = true;
+    }
+    vm.runInContext('srcList.forEach(s => s.enabled = true); genDuration = 10; E = 0', sandbox);
+  } catch (e) { console.error('PARTICLES FROZEN CHECK ERROR:', e.message); failed = true; }
+}
+
 // pointer-only scenario: mouse moving raises E, then stopping the mouse must
 // decay the pointer rate and freeze the field (no stale-rate boiling)
 if (!failed) {
