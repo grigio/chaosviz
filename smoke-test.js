@@ -12,6 +12,7 @@ if (!script) { console.error('NO SCRIPT'); process.exit(1); }
 const fillRects = [];
 const fillTexts = [];
 const ctxStyles = [];
+const drawImages = [];
 function ensureData(state) {
   if (!state.data && state.width && state.height) {
     state.data = new Uint8ClampedArray(state.width * state.height * 4);
@@ -52,6 +53,7 @@ function makeCtx(state) {
       if (k === 'fillRect') return (x, y, w, h) => { fillRects.push([x, y, w, h]); if (state.data) clearRegion(state, x, y, w, h); };
       if (k === 'clearRect') return (x, y, w, h) => { if (state.data) clearRegion(state, x, y, w, h); };
       if (k === 'fillText') return (text, x, y) => { fillTexts.push([text, x, y]); rasterize(state, text, x, y); };
+      if (k === 'drawImage') return (...a) => { drawImages.push(a); };
       if (k === 'createImageData') return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
       if (k === 'measureText') return () => ({ width: 10 });
       if (k === 'putImageData') return (img) => { state.data = img.data.slice(); state.width = img.width; state.height = img.height; };
@@ -284,6 +286,21 @@ if (!failed) {
     }
     vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
   } catch (e) { console.error('NOISE FREEZE CHECK ERROR:', e.message); failed = true; }
+}
+
+// the noise grain must be drawn with uniform scale so colored squares never stretch
+if (!failed) {
+  try {
+    const scale = vm.runInContext('grain.scale', sandbox);
+    const gw = vm.runInContext('grain.cw', sandbox), gh = vm.runInContext('grain.ch', sandbox);
+    const sqDraw = drawImages.filter(a => a.length >= 5 && Math.abs(a[3] - gw * scale) < 0.001 && Math.abs(a[4] - gh * scale) < 0.001).length;
+    if (sqDraw >= 1) {
+      console.log('SQUARE PIXELS OK (uniform cover scale ' + scale.toFixed(2) + ')');
+    } else {
+      console.error('SQUARE PIXELS FAILED: no uniform-scale grain draw found');
+      failed = true;
+    }
+  } catch (e) { console.error('SQUARE PIXELS CHECK ERROR:', e.message); failed = true; }
 }
 
 // CHAOS art must deteriorate gradually with entropy: protected during the hold

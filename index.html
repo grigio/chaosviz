@@ -613,13 +613,13 @@ function drawParticles() {
 }
 
 /* ================= noise mode ================= */
-// figlet "standard" CHAOS in pure ASCII (5 lines x 41 cols)
+// thick block-letter CHAOS in pure ASCII (5 lines x 33 cols), renders anywhere
 const CHAOS_ART = [
-  '  ____   _   _      _       ___    ____  ',
-  ' / ___| | | | |    / \\     / _ \\  / ___| ',
-  '| |     | |_| |   / _ \\   | | | | \\\\___ \\ ',
-  '| |___  |  _  |  / ___ \\  | |_| |  ___) |',
-  ' \\\\____| |_| |_| /_/   \\\\_\\  \\\\___/  |____/ '
+  '█████  ██ ██   ███    ███   █████',
+  '██     ██ ██  ██ ██  ██ ██  ██   ',
+  '██     █████  █████  ██ ██  █████',
+  '██     ██ ██  ██ ██  ██ ██     ██',
+  '█████  ██ ██  ██ ██   ███   █████'
 ];
 const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null };
 // precomputed RGB palette covering the full hue wheel (index = byte value)
@@ -675,13 +675,14 @@ function tickGrain(frac) {
   // horizontal cursor position sets the global color phase; entropy sweeps it over time
   const rot = (((ptr.x >= 0 ? ptr.x / W : 0) * 256 + nowT * 20 * E) | 0) % 256;
   // the static boils in a patch around the cursor; the patch grows with velocity
-  const gx0 = (ptr.x / W) * grain.cw, gy0 = (ptr.y / H) * grain.ch;
-  const gr = clamp((40 + ptr.speed * 0.06) * (grain.cw / W), 1, grain.cw * 0.4);
+  // (grain screen geometry comes from grain.ox/oy/scale set in drawNoise)
+  const gx0 = (ptr.x - grain.ox) / grain.scale, gy0 = (ptr.y - grain.oy) / grain.scale;
+  const gr = clamp((40 + ptr.speed * 0.06) / grain.scale, 1, grain.cw * 0.5);
   const data = grain.img.data;
   // colored pixels that land on the CHAOS art erase it: the art disappears
   // because new colored squares come, not on its own
   const eatArt = art.remaining > 0 && nowT >= art.holdUntil;
-  const cellW = Math.ceil(W / grain.cw), cellH = Math.ceil(H / grain.ch);
+  const cellW = Math.ceil(grain.scale), cellH = Math.ceil(grain.scale);
   let bi = 0;
   for (let j = 0; j < k; j++) {
     let px, py;
@@ -696,9 +697,11 @@ function tickGrain(frac) {
     }
     const idx = py * grain.cw + px;
     if (eatArt) {
-      // this colored square covers a region of the art layer: erase it there
-      const x0 = (px * W / grain.cw) | 0, y0 = (py * H / grain.ch) | 0;
-      const x1 = Math.min(W, x0 + cellW), y1 = Math.min(H, y0 + cellH);
+      // this colored square covers a square region of the art layer: erase it there
+      const x0 = Math.max(0, Math.floor(grain.ox + px * grain.scale));
+      const y0 = Math.max(0, Math.floor(grain.oy + py * grain.scale));
+      const x1 = Math.min(W, Math.ceil(grain.ox + (px + 1) * grain.scale));
+      const y1 = Math.min(H, Math.ceil(grain.oy + (py + 1) * grain.scale));
       art.ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
       const bm = art.bitmap;
       for (let ay = y0; ay < y1; ay++) {
@@ -730,13 +733,14 @@ function artReset() {
   }
   art.ctx.save();
   art.ctx.clearRect(0, 0, W, H); // transparent background: only the white art shows
-  const fs = Math.max(14, Math.floor(Math.min(W / 46, H / 12)));
+  // fit the thick art (33 cols x 5 lines) with generous margins, always centered
+  const fs = Math.max(12, Math.floor(Math.min(W / 40, H / 8)));
   art.ctx.fillStyle = '#ffffff';
   art.ctx.font = fs + 'px ui-monospace,monospace';
   art.ctx.textAlign = 'center';
   art.ctx.textBaseline = 'middle';
-  const lineH = fs * 1.12;
-  const top = H / 2 - (CHAOS_ART.length * lineH) / 2 + fs * 0.35;
+  const lineH = fs * 1.18;
+  const top = H / 2 - (CHAOS_ART.length * lineH) / 2 + fs * 0.4;
   for (let i = 0; i < CHAOS_ART.length; i++) art.ctx.fillText(CHAOS_ART[i], W / 2, top + i * lineH);
   art.ctx.restore();
   // bitmap of surviving art pixels; colored squares zero out the cells they cover
@@ -752,12 +756,17 @@ function artReset() {
 }
 function drawNoise() {
   // full-opacity, full-spectrum colored static; entropy drives the boil rate.
-  // The white CHAOS art sits on top; each colored square that lands on it
-  // erases that part, so the art deteriorates exactly where new pixels arrive.
+  // The grain is scaled uniformly (cover) so the colored squares stay square
+  // on any canvas size, centered with overflow cropped. The white CHAOS art
+  // sits on top; each colored square that lands on it erases that part.
+  const scale = Math.max(W / grain.cw, H / grain.ch);
+  grain.ox = (W - grain.cw * scale) / 2;
+  grain.oy = (H - grain.ch * scale) / 2;
+  grain.scale = scale;
   if (E > 0.005) tickGrain(Math.min(0.8, 0.2 + E * 0.7));
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
-  ctx.drawImage(grain.cv, 0, 0, W, H);
+  ctx.drawImage(grain.cv, grain.ox, grain.oy, grain.cw * scale, grain.ch * scale);
   ctx.imageSmoothingEnabled = true;
   if (art.remaining > 0) ctx.drawImage(art.cv, 0, 0, W, H);
   ctx.globalAlpha = 1;
