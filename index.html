@@ -637,7 +637,7 @@ function drawParticles() {
     ctx.fillStyle = chaos.free[i]
       ? 'hsla(' + Math.round((chaos.ph[i] * 360 + T * 140) % 360) + ',90%,' + (50 + T * 16) + '%,0.8)'
       : 'rgba(255,255,255,0.9)';
-    ctx.fillRect(chaos.x[i], chaos.y[i], 3, 3);
+    ctx.fillRect(chaos.x[i], chaos.y[i], 2, 2);
   }
   for (let i = 0; i < part.n; i++) {
     ctx.fillStyle = 'hsla(' + Math.round((part.ph[i] * 360 + T * 140) % 360) + ',90%,' + (50 + T * 16) + '%,' + (0.12 + T * 0.25) + ')';

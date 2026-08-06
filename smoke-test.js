@@ -302,6 +302,20 @@ if (!failed) {
   } catch (e) { console.error('SQUARE PIXELS CHECK ERROR:', e.message); failed = true; }
 }
 
+// all particles must be drawn at the same 2x2 size (only tiny dot draws count;
+// full-screen background fills are larger by design)
+if (!failed) {
+  const smallDraws = fillRects.filter(a => a.length === 4 && a[2] <= 4 && a[3] <= 4);
+  const dot2 = smallDraws.filter(a => a[2] === 2 && a[3] === 2).length;
+  const non2 = smallDraws.filter(a => !(a[2] === 2 && a[3] === 2)).length;
+  if (dot2 > 0 && non2 === 0) {
+    console.log('PARTICLE SIZE OK (' + dot2 + ' dot draws, all exactly 2x2)');
+  } else {
+    console.error('PARTICLE SIZE FAILED: 2x2=' + dot2 + ' otherSmall=' + non2);
+    failed = true;
+  }
+}
+
 // CHAOS art must deteriorate gradually with entropy: protected during the hold
 // window, then eroded pixel by pixel to nothing (never vanishing in one frame)
 if (!failed) {
