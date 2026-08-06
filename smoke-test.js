@@ -82,13 +82,20 @@ const win = {
 let rafCb = null;
 let gridMaxCells = 0;
 let maxBadCells = 0;
+// controllable clock so the harness can simulate the passage of time
+const clock = { t: performance.now() };
+const performanceStub = { now: () => clock.t };
 const intervals = [], timeouts = [];
 const globalListeners = {};
+// helper: run the non-CPU interval callbacks (CPU probe spins on wall clock)
+function runIntervals() {
+  intervals.forEach(iv => { if (iv.ms === 1000) return; try { iv.fn(); } catch (e) { throw e; } });
+}
 const sandbox = {
   window: win,
   document: doc,
   navigator: { hardwareConcurrency: 8, deviceMemory: 8, onLine: true, getBattery: undefined },
-  performance,
+  performance: performanceStub,
   crypto: globalThis.crypto,
   requestAnimationFrame: cb => { rafCb = cb; return 1; },
   matchMedia: () => ({ matches: TEST_W <= 640 }),
@@ -131,7 +138,7 @@ if (!failed && rafCb) {
       (globalListeners.pointermove || []).forEach(fn => fn({ clientX: 100 + f % 500, clientY: 200 + f % 400 }));
       (globalListeners.keydown || []).forEach(fn => fn({ key: 'a', keyCode: 65 }));
       // run harvester + HUD ticks so entropy E rises during the simulation
-      intervals.forEach(iv => { try { iv.fn(); } catch (e) { throw e; } });
+      runIntervals();
     }
     if (f === 100) { (globalListeners.keydown || []).forEach(fn => fn({ key: '2', keyCode: 50 })); modeIdx = 1; }
     if (f === 200) { (globalListeners.keydown || []).forEach(fn => fn({ key: '3', keyCode: 51 })); modeIdx = 2; }
@@ -207,6 +214,38 @@ if (!failed) {
     }
     vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
   } catch (e) { console.error('NOISE FREEZE CHECK ERROR:', e.message); failed = true; }
+}
+
+// pointer-only scenario: mouse moving raises E, then stopping the mouse must
+// decay the pointer rate and freeze the field (no stale-rate boiling)
+if (!failed) {
+  try {
+    vm.runInContext('mode = "noise"; srcList.forEach(s => s.enabled = false); SRC.pointer.enabled = true; E = 0', sandbox);
+    const hudTicks = intervals.filter(iv => iv.ms === 250);
+    // move the mouse: 300 events with realistic jittered timing, HUD ticks every 12 events
+    for (let i = 0; i < 300; i++) {
+      clock.t += 8 + (i % 5); // jittered inter-event gap, like a real mouse
+      (globalListeners.pointermove || []).forEach(fn => fn({ clientX: 100 + i * 2, clientY: 200 + (i % 9) * 5 }));
+      if (i % 12 === 0) { clock.t += 250; hudTicks.forEach(iv => { try { iv.fn(); } catch (e) {} }); }
+    }
+    clock.t += 250; hudTicks.forEach(iv => { try { iv.fn(); } catch (e) {} });
+    const eHigh = vm.runInContext('E', sandbox);
+    const pbHigh = vm.runInContext('SRC.pointer.bps', sandbox);
+    // mouse stops: advance the clock through decay ticks only (field untouched)
+    for (let i = 0; i < 40; i++) { clock.t += 250; hudTicks.forEach(iv => { try { iv.fn(); } catch (e) {} }); }
+    const eLow = vm.runInContext('E', sandbox);
+    const pbLow = vm.runInContext('SRC.pointer.bps', sandbox);
+    const frozen1 = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    for (let i = 0; i < 20; i++) { clock.t += 16.6; rafCb(clock.t); }
+    const frozen2 = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    if (eHigh > 0.005 && pbHigh > 30 && pbLow < 50 && eLow < 0.005 && frozen1 === frozen2) {
+      console.log('POINTER IDLE DECAY OK (bps ' + Math.round(pbHigh) + ' -> ' + pbLow.toExponential(1) + ', E ' + eHigh.toFixed(3) + ' -> ' + eLow.toExponential(1) + ', frozen)');
+    } else {
+      console.error('POINTER IDLE DECAY FAILED: eHigh=' + eHigh + ' pbHigh=' + pbHigh + ' pbLow=' + pbLow + ' eLow=' + eLow + ' changed=' + (frozen1 !== frozen2));
+      failed = true;
+    }
+    vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
+  } catch (e) { console.error('POINTER IDLE DECAY CHECK ERROR:', e.message); failed = true; }
 }
 
 // verify grid actually populated during its time in grid mode (frames 0-100)

@@ -374,7 +374,7 @@ addEventListener('keydown', e => {
 let cpuRef = 0;
 function busy(dur) {
   const t0 = performance.now(); let c = 0;
-  while (performance.now() - t0 < dur) { let x = 0; for (let i = 0; i < 64; i++) x = (x * 31 + 7) | 0; c++; }
+  while (performance.now() - t0 < dur && c < 2e6) { let x = 0; for (let i = 0; i < 64; i++) x = (x * 31 + 7) | 0; c++; }
   return c;
 }
 cpuRef = busy(30);
@@ -494,6 +494,16 @@ function sysLine() {
     ' \u00b7 ' + (devicePixelRatio || 1).toFixed(1) + '\u00d7 \u00b7 ' + W + '\u00d7' + H;
 }
 setInterval(() => {
+  // decay any estimator whose source has gone quiet, so visuals freeze shortly
+  // after input stops (a rate is only real while samples keep arriving)
+  const nowMs = performance.now();
+  for (const s of srcList) {
+    if (s.est && s.est.last != null && nowMs - s.est.last > 150) {
+      const f = Math.pow(0.5, (nowMs - s.est.last) / 400);
+      s.est.bps *= f;
+      s.bps = s.est.bps;
+    }
+  }
   let total = 0;
   for (const s of srcList) if (s.enabled && s.available) total += s.bps;
   total = Math.min(total, MAX_RATE);
