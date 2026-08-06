@@ -191,6 +191,7 @@ const Pool = {
   state: new Uint32Array(16),
   n: 0,
   totalBytes: 0,
+  counter: 0,
   add(x) {
     this.state[this.n & 15] ^= (x >>> 0);
     this.n++; this.totalBytes += 4;
@@ -209,13 +210,31 @@ const Pool = {
     }
   },
   getBytes(n) {
-    const s = this.state.slice();
-    for (let i = 0; i < 16; i++) {
-      s[i] = (s[i] + 0x9e3779b9 + ((i * 0x85ebca6b) | 0)) | 0;
-      s[i] = ((s[i] << 13) | (s[i] >>> 19)) ^ s[(i + 5) & 15];
-    }
+    // counter-mode stream: hash(pool state, block counter) -> 64 fresh bytes per block.
+    // No 64-byte periodicity, and with a frozen pool each call still yields a
+    // deterministic stream that advances via the counter.
     const out = new Uint8Array(n);
-    for (let i = 0; i < n; i++) out[i] = (s[(i >> 2) & 15] >>> ((i & 3) * 8)) & 255;
+    const s = this.state.slice();
+    let counter = this.counter >>> 0;
+    let oi = 0;
+    while (oi < n) {
+      const h = s.slice();
+      h[0] = (h[0] + counter) | 0;
+      h[1] = (h[1] + ((counter * 0x85ebca6b) | 0)) | 0;
+      for (let i = 0; i < 16; i++) {
+        h[i] = (h[i] + 0x9e3779b9 + ((i * 0x85ebca6b) | 0)) | 0;
+        h[i] = ((h[i] << 13) | (h[i] >>> 19)) ^ h[(i + 5) & 15];
+      }
+      for (let i = 0; i < 16 && oi < n; i++) {
+        const w = h[i];
+        out[oi++] = w & 255;
+        if (oi < n) out[oi++] = (w >>> 8) & 255;
+        if (oi < n) out[oi++] = (w >>> 16) & 255;
+        if (oi < n) out[oi++] = (w >>> 24) & 255;
+      }
+      counter = (counter + 1) >>> 0;
+    }
+    this.counter = counter;
     return out;
   }
 };
@@ -483,7 +502,7 @@ setInterval(() => {
   $('#harvest').textContent = 'pool ' + fmtBytes(Pool.totalBytes) + ' mixed';
   $('#sysline').textContent = sysLine();
   Eraw = total / MAX_RATE;
-  E = E * 0.8 + Eraw * 0.2;
+  E = E * 0.6 + Eraw * 0.4;
   hist.push(total);
   if (hist.length > 240) hist.shift();
   drawHist();
@@ -711,7 +730,7 @@ function grainInit() {
 }
 function fillGrain() {
   const d = grain.img.data;
-  const buf = crBytes(grain.cw * grain.ch * 2);
+  const buf = Pool.getBytes(grain.cw * grain.ch * 2); // bytes come from the harvested pool
   for (let i = 0; i < grain.cw * grain.ch; i++) {
     const h = buf[i * 2], f = 0.45 + 0.55 * (buf[i * 2 + 1] / 255);
     const o = i * 3, p = h * 3;
@@ -723,7 +742,7 @@ function grainReset() { fillGrain(); }
 function tickGrain(frac) {
   const len = grain.cw * grain.ch;
   const k = Math.max(1, Math.round(len * frac));
-  const buf = crBytes(k * 2);
+  const buf = Pool.getBytes(k * 2); // bytes come from the harvested pool
   const rot = ((nowT * 20 * E) | 0) % 256; // hue sweep scales with entropy: 0 when all sources off
   const data = grain.img.data;
   let bi = 0;

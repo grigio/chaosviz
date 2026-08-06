@@ -181,29 +181,30 @@ if (!failed) {
   } catch (e) { console.error('GRAIN PALETTE CHECK ERROR:', e.message); failed = true; }
 }
 
-// verify the noise field freezes when all sources are disabled (E=0)
+// verify the noise field boils with entropy present and freezes when all sources are disabled
 if (!failed) {
   try {
-    // disable every source, let E decay, and confirm grain stops being re-rolled
+    vm.runInContext('mode = "noise"', sandbox);
+    // A) with entropy present the static must boil (change between frames)
+    vm.runInContext('E = 0.5', sandbox);
+    const base = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    for (let i = 0; i < 8; i++) rafCb(performance.now() + i * 16.6);
+    const boiled = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    if (boiled !== base) console.log('NOISE BOIL OK (static changes with entropy present)');
+    else { console.error('NOISE BOIL FAILED: static unchanged at E=0.5'); failed = true; }
+    // B) all sources disabled -> E decays below threshold -> field freezes bit-for-bit
     vm.runInContext('srcList.forEach(s => s.enabled = false)', sandbox);
-    for (let i = 0; i < 12; i++) intervals.forEach(iv => { try { iv.fn(); } catch (e) {} });
-    const before = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
-    // run 20 noise frames with E=0
-    let noiseFrames = 0, f2 = 0;
-    while (noiseFrames < 20 && f2 < 200) {
-      f2++;
-      try { rafCb(performance.now() + f2 * 16.6); } catch (e) { throw e; }
-      const m = vm.runInContext('mode', sandbox);
-      if (m === 'noise') noiseFrames++;
-    }
-    const after = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
-    if (before === after) {
-      console.log('NOISE FREEZE OK (static unchanged with all sources off)');
+    for (let i = 0; i < 20; i++) intervals.forEach(iv => { try { iv.fn(); } catch (e) {} });
+    const eVal = vm.runInContext('E', sandbox);
+    const frozen1 = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    for (let i = 0; i < 20; i++) rafCb(performance.now() + 1000 + i * 16.6);
+    const frozen2 = vm.runInContext('JSON.stringify(Array.from(grain.img.data))', sandbox);
+    if (eVal < 0.005 && frozen1 === frozen2) {
+      console.log('NOISE FREEZE OK (E=' + eVal.toFixed(4) + ', static frozen)');
     } else {
-      console.error('NOISE FREEZE FAILED: static changed while E=0');
+      console.error('NOISE FREEZE FAILED: E=' + eVal + ', changed=' + (frozen1 !== frozen2));
       failed = true;
     }
-    // restore enabled state
     vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
   } catch (e) { console.error('NOISE FREEZE CHECK ERROR:', e.message); failed = true; }
 }
