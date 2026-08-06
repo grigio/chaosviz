@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#020408">
+<title>ENTROPY//viz</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #020408;
+    color: #cfeffc;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #scene { position: fixed; inset: 0; display: block; touch-action: none; }
+  #progress { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 11; pointer-events: none; }
+  #progress i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, #2ad9a0, #8fffc0);
+    box-shadow: 0 0 12px rgba(80,255,190,.8);
+    transition: width .1s linear;
+  }
+  #hud {
+    position: fixed; inset: 0; pointer-events: none; z-index: 10;
+    transition: opacity .25s;
+  }
+  #hud.hidden { opacity: 0; }
+  #topbar {
+    position: absolute;
+    top: calc(10px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
+    right: calc(12px + env(safe-area-inset-right));
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  }
+  #brand {
+    font-size: 13px; letter-spacing: 3px; color: #7df;
+    text-shadow: 0 0 12px rgba(80,220,255,.5);
+  }
+  #brand .cursor { animation: blink 1s steps(1) infinite; color: #0ff; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #pool {
+    display: block; margin-top: 3px; font-size: 9px; letter-spacing: 1px;
+    color: rgba(160,220,240,.55); max-width: 62vw;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #ratebox { text-align: right; }
+  #right { display: flex; align-items: center; gap: 10px; }
+  #pause-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    font: inherit; font-size: 11px; color: #9fe; text-align: center;
+    background: rgba(3,12,18,.72); border: 1px solid rgba(120,240,200,.28);
+    cursor: pointer; touch-action: manipulation;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: all .15s;
+  }
+  #pause-btn:hover { border-color: #8fffc0; color: #fff; }
+  #pause-btn.paused { color: #ffd27d; border-color: rgba(255,210,125,.55); box-shadow: 0 0 12px rgba(255,210,125,.25); }
+  #rate-num {
+    font-size: 22px; color: #fff; line-height: 1;
+    text-shadow: 0 0 14px rgba(120,255,220,.8);
+  }
+  #rate-label { display: block; margin-top: 3px; font-size: 9px; letter-spacing: 2px; color: rgba(160,220,240,.6); }
+  #modes {
+    position: absolute; bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; pointer-events: auto;
+  }
+  .mode-btn {
+    font: inherit; letter-spacing: 2px; padding: 10px 12px; min-width: 44px;
+    color: #9fe; background: rgba(3,12,18,.72);
+    border: 1px solid rgba(120,240,200,.28); border-radius: 10px;
+    cursor: pointer; touch-action: manipulation;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: all .15s;
+  }
+  .mode-btn.active {
+    color: #04121a;
+    background: linear-gradient(180deg, #8fffc0, #2ad9a0);
+    border-color: #8fffc0;
+    box-shadow: 0 0 18px rgba(80,255,190,.35);
+  }
+  .mode-btn:active { transform: scale(.96); }
+  .mode-btn:focus-visible, .src:focus-visible, #gen-slider:focus-visible { outline: 1px solid #8fffc0; outline-offset: 2px; }
+  #panel {
+    position: absolute;
+    top: calc(64px + env(safe-area-inset-top));
+    left: calc(12px + env(safe-area-inset-left));
+    width: 300px; max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 160px); overflow-y: auto;
+    pointer-events: auto;
+    background: rgba(4,12,18,.82);
+    border: 1px solid rgba(120,240,200,.22); border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    scrollbar-width: thin; scrollbar-color: rgba(120,240,200,.3) transparent;
+  }
+  #panel-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; font-size: 10px; letter-spacing: 2px; color: #9fe;
+    cursor: pointer; user-select: none;
+  }
+  #panel-note { margin-left: auto; color: rgba(160,220,240,.4); font-size: 9px; letter-spacing: 1px; }
+  #panel-arrow { color: rgba(160,220,240,.5); font-size: 10px; }
+  #panel.collapsed #sources { display: none; }
+  #sources { display: flex; flex-direction: column; border-top: 1px solid rgba(120,240,200,.12); }
+  .src {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; cursor: pointer; user-select: none;
+    border-top: 1px dashed rgba(255,255,255,.06);
+  }
+  .src:first-child { border-top: none; }
+  .src:hover { background: rgba(120,240,200,.05); }
+  .src .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .src .nm { letter-spacing: 1px; color: #bfe; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .src canvas { width: 72px; height: 20px; flex: none; }
+  .src .val { min-width: 76px; text-align: right; color: #fff; flex: none; font-size: 11px; }
+  .src .val small { color: rgba(160,220,240,.5); margin-left: 3px; font-size: 9px; }
+  .src.off { opacity: .32; }
+  .src.unavail { display: none; }
+  #gen-ctl { padding: 10px 12px; border-top: 1px solid rgba(120,240,200,.12); }
+  .ctl-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .ctl-row label { font-size: 9px; letter-spacing: 2px; color: #9fe; }
+  #gen-val { font-size: 14px; color: #fff; }
+  #gen-slider { width: 100%; margin: 8px 0 4px; accent-color: #2ad9a0; height: 20px; touch-action: manipulation; }
+  #sysline { font-size: 9px; color: rgba(160,220,240,.5); letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #history { width: 100%; height: 80px; margin-top: 8px; background: rgba(0,0,0,.35); border-radius: 6px; border: 1px solid rgba(120,240,200,.12); }
+  #harvest { font-size: 9px; color: rgba(160,220,240,.45); margin-top: 6px; }
+  #hint {
+    position: absolute;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    right: calc(12px + env(safe-area-inset-right));
+    font-size: 9px; letter-spacing: 1px; color: rgba(160,220,240,.35);
+  }
+  @media (max-width: 640px) {
+    #brand { font-size: 12px; }
+    #rate-num { font-size: 18px; }
+    #panel { width: 280px; max-height: calc(100vh - 180px); }
+    .mode-btn { padding: 9px 8px; min-width: 40px; letter-spacing: 1px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="progress"><i></i></div>
+<div id="hud">
+  <header id="topbar">
+    <div>
+      <div id="brand">ENTROPY<span class="cursor">_</span></div>
+      <div id="pool"></div>
+    </div>
+    <div id="right">
+      <div id="ratebox"><span id="rate-num">0</span><span id="rate-label">BITS/S</span></div>
+      <button id="pause-btn" title="pause / resume (p)">❚❚</button>
+    </div>
+  </header>
+  <nav id="modes">
+    <button class="mode-btn active" data-mode="grid">GRID</button>
+    <button class="mode-btn" data-mode="particles">PARTICLES</button>
+    <button class="mode-btn" data-mode="noise">NOISE</button>
+    <button class="mode-btn" data-mode="rain">RAIN</button>
+  </nav>
+  <aside id="panel">
+    <div id="panel-head"><span>SOURCES</span><span id="panel-note">tap to toggle</span><span id="panel-arrow">▾</span></div>
+    <div id="sources"></div>
+    <div id="gen-ctl">
+      <div class="ctl-row"><label>GENERATION</label><span id="gen-val">10s</span></div>
+      <input id="gen-slider" type="range" min="2" max="60" step="1" value="10">
+      <div id="sysline"></div>
+      <canvas id="history" width="300" height="80"></canvas>
+      <div id="harvest"></div>
+    </div>
+  </aside>
+  <footer id="hint">h hud · p pause · 1-4 modes</footer>
+</div>
+<script>
+'use strict';
+
+/* ================= helpers ================= */
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => v<a ? a : (v>b ? b : v);
+const fmt = n => n>=1e6 ? (n/1e6).toFixed(2)+'M' : n>=1e3 ? (n/1e3).toFixed(1)+'k' : Math.round(n)+'';
+const fmtBytes = n => n>=1048576 ? (n/1048576).toFixed(2)+' MiB' : n>=1024 ? (n/1024).toFixed(1)+' KiB' : n+' B';
+
+/* ================= entropy pool ================= */
+const Pool = {
+  state: new Uint32Array(16),
+  n: 0,
+  totalBytes: 0,
+  add(x) {
+    this.state[this.n & 15] ^= (x >>> 0);
+    this.n++; this.totalBytes += 4;
+    if ((this.n & 3) === 0) this.stir();
+  },
+  addBytes(b) {
+    for (let i = 0; i < b.length; i++) { this.state[this.n & 15] ^= b[i]; this.n++; }
+    this.totalBytes += b.length;
+    this.stir();
+  },
+  stir() {
+    for (let i = 0; i < 16; i++) {
+      let x = this.state[i];
+      x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+      this.state[i] = (x + this.state[(i + 7) & 15]) | 0;
+    }
+  },
+  getBytes(n) {
+    const s = this.state.slice();
+    for (let i = 0; i < 16; i++) {
+      s[i] = (s[i] + 0x9e3779b9 + ((i * 0x85ebca6b) | 0)) | 0;
+      s[i] = ((s[i] << 13) | (s[i] >>> 19)) ^ s[(i + 5) & 15];
+    }
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) out[i] = (s[(i >> 2) & 15] >>> ((i & 3) * 8)) & 255;
+    return out;
+  }
+};
+// seed with a few constants + real randomness if available
+Pool.add(0x9e3779b9); Pool.add(0x85ebca6b); Pool.add(0xc2b2ae35);
+try { Pool.addBytes(crypto.getRandomValues(new Uint8Array(512))); } catch (e) {}
+
+let _pr = Pool.getBytes(4096), _pi = 0;
+function prng() {
+  if (_pi >= _pr.length) { _pr = Pool.getBytes(4096); _pi = 0; }
+  return _pr[_pi++] / 256; // always < 1, so (prng()*N)|0 stays in [0, N-1]
+}
+function crBytes(n) {
+  try { return crypto.getRandomValues(new Uint8Array(n)); }
+  catch (e) { return Pool.getBytes(n); }
+}
+
+/* ================= entropy estimator ================= */
+function makeEstimator(maxBps, shift) {
+  const e = { maxBps, shift: shift || 0, bps: 0, eps: 0, bpe: 1, last: null, hist: new Float64Array(16), hn: 0 };
+  e.note = function (now) {
+    if (this.last != null) {
+      const dt = now - this.last;
+      if (dt > 0 && dt < 1e5) {
+        const us = (dt * 1000) | 0;
+        const b = (us >> this.shift) & 15;
+        this.hist[b]++; this.hn++;
+        if (this.hn >= 64) {
+          let H = 0;
+          for (let i = 0; i < 16; i++) { const p = this.hist[i] / this.hn; if (p > 0) H -= p * Math.log2(p); }
+          this.bpe = this.bpe * 0.7 + H * 0.3;
+          this.hist.fill(0); this.hn = 0;
+        }
+        const inst = 1000 / Math.max(dt, 0.01);
+        this.eps = this.eps * 0.9 + inst * 0.1;
+        this.bps = this.bps * 0.9 + Math.min(this.bpe * this.eps, this.maxBps) * 0.1;
+      }
+    }
+    this.last = now;
+    return this.bps;
+  };
+  return e;
+}
+
+/* ================= sources ================= */
+const SRC = {};
+const ORDER = ['timer', 'pointer', 'keys', 'cpu', 'crypto', 'net', 'battery', 'orient'];
+const SRC_COLORS = {
+  timer: '#8fffc0', pointer: '#7fd7ff', keys: '#ffd27d', cpu: '#ff8f8f',
+  crypto: '#d99fff', net: '#ffb47d', battery: '#9fdf7d', orient: '#7de8d9'
+};
+function defSrc(key, name, unit, max, opts) {
+  const s = Object.assign({
+    key, name, unit, max,
+    enabled: true, available: true, gauge: false,
+    bps: 0, value: 0, spark: [], color: SRC_COLORS[key] || '#8fffc0',
+    row: null, canvas: null, valEl: null
+  }, opts || {});
+  if (!s.gauge) s.est = makeEstimator(s.max, s.shift || 0);
+  SRC[key] = s;
+  return s;
+}
+const timerS = defSrc('timer',  'TIME',    'bits/s', 3000);
+const ptrS   = defSrc('pointer','POINTER', 'bits/s', 6000);
+const keyS   = defSrc('keys',   'KEYS',    'bits/s', 600);
+const cpuS   = defSrc('cpu',    'CPU LOAD','%',      100, { gauge: true });
+const rngS   = defSrc('crypto', 'HW RNG',  'MiB/s',  16,  { gauge: true });
+const netS   = defSrc('net',    'NET RTT', 'bits/s', 300, { shift: 8 });
+const batS   = defSrc('battery','BATTERY', '%',      100, { gauge: true });
+const oriS   = defSrc('orient', 'ORIENT',  'bits/s', 4000);
+netS.enabled = false;
+
+const srcList = [];
+function buildSources() {
+  const el = $('#sources');
+  for (const key of ORDER) {
+    const s = SRC[key];
+    const row = document.createElement('div');
+    row.className = 'src' + (s.enabled ? '' : ' off');
+    row.innerHTML =
+      '<span class="dot" style="background:' + s.color + ';box-shadow:0 0 8px ' + s.color + '"></span>' +
+      '<span class="nm">' + s.name + '</span>' +
+      '<canvas width="72" height="20"></canvas>' +
+      '<span class="val"><b>0</b><small>' + s.unit + '</small></span>';
+    row.addEventListener('click', () => {
+      if (!s.available) return;
+      s.enabled = !s.enabled;
+      row.classList.toggle('off', !s.enabled);
+      if (s.key === 'net' && s.enabled && !s.started) { s.started = true; netPing(); }
+    });
+    s.row = row; s.valEl = row.querySelector('.val b'); s.canvas = row.querySelector('canvas');
+    s.dot = row.querySelector('.dot');
+    el.appendChild(row);
+    srcList.push(s);
+  }
+}
+function updateAvail() {
+  for (const s of srcList) {
+    s.row.classList.toggle('unavail', !s.available);
+    if (!s.available) s.enabled = false;
+  }
+}
+
+/* ================= harvesters ================= */
+setInterval(() => {
+  if (!timerS.enabled) return;
+  const t = performance.now();
+  timerS.bps = timerS.est.note(t);
+  Pool.add((t * 1000) | 0);
+}, 4);
+
+addEventListener('pointermove', e => {
+  if (!ptrS.enabled) return;
+  const t = performance.now();
+  ptrS.bps = ptrS.est.note(t);
+  Pool.add(((e.clientX * 2654435761) ^ (e.clientY * 40503) ^ ((t * 1000) | 0)) >>> 0);
+}, { passive: true });
+addEventListener('pointerdown', e => {
+  if (!ptrS.enabled) return;
+  const t = performance.now();
+  ptrS.bps = ptrS.est.note(t);
+  Pool.add(((e.clientX * 40503) ^ ((t * 1000) | 0)) >>> 0);
+}, { passive: true });
+
+addEventListener('keydown', e => {
+  if (keyS.enabled) {
+    const t = performance.now();
+    keyS.bps = keyS.est.note(t);
+    Pool.add(((e.keyCode * 40503) ^ ((t * 1000) | 0)) >>> 0);
+  }
+  if (e.key === 'h') { $('#hud').classList.toggle('hidden'); }
+  else if (e.key === 'p') { togglePause(); }
+  else if (e.key >= '1' && e.key <= '4') { setMode(MODES[+e.key - 1]); }
+});
+
+// CPU load probe
+let cpuRef = 0;
+function busy(dur) {
+  const t0 = performance.now(); let c = 0;
+  while (performance.now() - t0 < dur) { let x = 0; for (let i = 0; i < 64; i++) x = (x * 31 + 7) | 0; c++; }
+  return c;
+}
+cpuRef = busy(30);
+setInterval(() => {
+  if (!cpuS.enabled) return;
+  const t0 = performance.now();
+  const c = busy(20);
+  const load = clamp(1 - c / cpuRef, 0, 1);
+  cpuS.value = cpuS.value * 0.6 + load * 0.4 * 100;
+  cpuS.bps = cpuS.value * 30;
+  Pool.add((c ^ ((t0 * 1000) | 0)) >>> 0);
+}, 1000);
+
+// HW RNG throughput (reference source)
+setInterval(() => {
+  if (!rngS.enabled) return;
+  const arr = new Uint8Array(4096);
+  const t0 = performance.now();
+  try { crypto.getRandomValues(arr); } catch (e) { arr.set(Pool.getBytes(4096)); }
+  const dt = Math.max(performance.now() - t0, 0.05);
+  rngS.value = rngS.value * 0.7 + (arr.length / 1048576 / (dt / 1000)) * 0.3;
+  rngS.bps = 800;
+  Pool.addBytes(arr);
+}, 500);
+
+// Network RTT jitter (opt-in, no permission)
+function netPing() {
+  const img = new Image();
+  const t0 = performance.now();
+  const done = () => {
+    if (!netS.enabled) return;
+    const dt = performance.now() - t0;
+    netS.bps = netS.est.note(performance.now());
+    Pool.add((Math.round(dt * 1000) >>> 0) ^ 0x7e4a);
+    setTimeout(netPing, 1200 + prng() * 1800);
+  };
+  img.onload = done; img.onerror = done;
+  img.src = 'https://www.google.com/favicon.ico?r=' + Math.random();
+}
+
+// Battery (no permission)
+if (navigator.getBattery) {
+  navigator.getBattery().then(b => {
+    batS.available = true; updateAvail();
+    const upd = () => {
+      batS.value = b.level * 100;
+      batS.bps = 30;
+      Pool.add((((b.level * 1000) | 0) ^ (b.charging ? 0x5a5a : 0xa5a5)) >>> 0);
+    };
+    upd();
+    b.addEventListener('levelchange', upd);
+    b.addEventListener('chargingchange', upd);
+  }).catch(() => { batS.available = false; updateAvail(); });
+} else { batS.available = false; }
+
+// Device orientation (mobile only, auto-detected)
+if ('DeviceOrientationEvent' in window) {
+  window.addEventListener('deviceorientation', ev => {
+    if (!oriS.enabled) return;
+    if (!oriS.available) { oriS.available = true; updateAvail(); }
+    const t = performance.now();
+    oriS.bps = oriS.est.note(t);
+    Pool.add((((ev.alpha * 10000) | 0) ^ ((ev.beta * 10000) | 0) ^ ((ev.gamma * 10000) | 0) ^ ((t * 1000) | 0)) >>> 0);
+  }, true);
+  setTimeout(() => { if (!oriS.available) { oriS.available = false; updateAvail(); } }, 3000);
+}
+
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+/* ================= HUD tick ================= */
+const MAX_RATE = 5000;
+let E = 0, Eraw = 0, flash = 0, paused = false;
+const hist = [];
+const histCtx = $('#history').getContext('2d');
+let genDuration = 10, genT = 0, genProgress = 0;
+const progressEl = $('#progress i');
+
+function drawSpark(s) {
+  const c = s.canvas.getContext('2d'), w = c.canvas.width, h = c.canvas.height;
+  c.clearRect(0, 0, w, h);
+  const d = s.spark, max = s.max;
+  if (d.length < 2) return;
+  c.strokeStyle = s.color; c.lineWidth = 1.2; c.beginPath();
+  for (let i = 0; i < d.length; i++) {
+    const x = (i / (d.length - 1)) * w;
+    const y = h - clamp(d[i] / max, 0, 1) * (h - 2) - 1;
+    i ? c.lineTo(x, y) : c.moveTo(x, y);
+  }
+  c.stroke();
+}
+function drawHist() {
+  const w = histCtx.canvas.width, h = histCtx.canvas.height;
+  histCtx.clearRect(0, 0, w, h);
+  histCtx.strokeStyle = 'rgba(120,240,200,.12)'; histCtx.lineWidth = 1;
+  histCtx.beginPath();
+  for (let i = 1; i < 4; i++) { histCtx.moveTo(0, i * h / 4); histCtx.lineTo(w, i * h / 4); }
+  histCtx.stroke();
+  const d = hist;
+  if (d.length < 2) return;
+  histCtx.beginPath();
+  for (let i = 0; i < d.length; i++) {
+    const x = (i / (d.length - 1)) * w;
+    const y = h - clamp(d[i] / MAX_RATE, 0, 1) * (h - 2) - 1;
+    i ? histCtx.lineTo(x, y) : histCtx.moveTo(x, y);
+  }
+  histCtx.strokeStyle = '#8fffc0'; histCtx.lineWidth = 1.5; histCtx.stroke();
+}
+function hexBytes(n) {
+  let out = '';
+  const b = Pool.getBytes(n);
+  for (let i = 0; i < b.length; i++) out += (b[i] < 16 ? '0' : '') + b[i].toString(16);
+  return out;
+}
+function sysLine() {
+  return 'SYS ' + (navigator.hardwareConcurrency || '?') + 'C / ' + (navigator.deviceMemory || '?') +
+    'GB \u00b7 ' + (navigator.onLine ? 'ONLINE' : 'OFFLINE') +
+    ' \u00b7 ' + (devicePixelRatio || 1).toFixed(1) + '\u00d7 \u00b7 ' + W + '\u00d7' + H;
+}
+setInterval(() => {
+  let total = 0;
+  for (const s of srcList) if (s.enabled && s.available) total += s.bps;
+  total = Math.min(total, MAX_RATE);
+  $('#rate-num').textContent = Math.round(total);
+  $('#pool').textContent = hexBytes(16);
+  $('#harvest').textContent = 'pool ' + fmtBytes(Pool.totalBytes) + ' mixed';
+  $('#sysline').textContent = sysLine();
+  Eraw = total / MAX_RATE;
+  E = E * 0.8 + Eraw * 0.2;
+  hist.push(total);
+  if (hist.length > 240) hist.shift();
+  drawHist();
+  for (const s of srcList) {
+    s.spark.push(s.gauge ? s.value : s.bps);
+    if (s.spark.length > 60) s.spark.shift();
+    s.valEl.textContent = s.gauge ? s.value.toFixed(1) : fmt(s.bps);
+    drawSpark(s);
+  }
+}, 250);
+
+/* ================= generation ================= */
+const MODES = ['grid', 'particles', 'noise', 'rain'];
+let mode = 'grid';
+let gridAcc = 0;
+
+function togglePause() {
+  paused = !paused;
+  $('#pause-btn').textContent = paused ? '\u25b6' : '\u275a\u275a';
+  $('#pause-btn').classList.toggle('paused', paused);
+}
+
+function resetGeneration() {
+  genT = 0; genProgress = 0; gridAcc = 0;
+  gridReset(); partReset(); rainReset();
+}
+function completeGeneration() {
+  flash = Math.max(flash, 0.9);
+  resetGeneration();
+}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  flash = Math.max(flash, 0.3);
+  resetGeneration();
+}
+
+/* ================= grid mode ================= */
+const NB = [[1,0],[-1,0],[0,1],[0,-1]];
+const grid = { cells: new Map(), frontier: [], cell: 0, ox: 0, oy: 0, n: 24, side: 0 };
+function gridLayout() {
+  grid.n = (W * H < 360 * 640) ? 20 : 24;
+  grid.side = Math.min(W, H) * 0.86;
+  grid.cell = grid.side / grid.n;
+  grid.ox = (W - grid.side) / 2;
+  grid.oy = (H - grid.side) / 2;
+}
+function gridReset() {
+  grid.cells.clear(); grid.frontier.length = 0;
+  // seed the center so the grid is alive immediately
+  const c0 = (grid.n / 2) | 0, r0 = (grid.n / 2) | 0;
+  const seeds = [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+  for (const [dc, dr] of seeds) {
+    const c = c0 + dc, r = r0 + dr;
+    if (c >= 0 && c < grid.n && r >= 0 && r < grid.n) grid._add(r * grid.n + c, c, r);
+  }
+}
+function rebuildFrontier() {
+  grid.frontier.length = 0;
+  const n = grid.n;
+  for (const key of grid.cells.keys()) {
+    const r = (key / n) | 0, c = key % n;
+    for (const [nc, nr] of NB) {
+      if (nc >= 0 && nc < n && nr >= 0 && nr < n && !grid.cells.has(nr * n + nc)) grid.frontier.push(nr * n + nc);
+    }
+  }
+}
+function gridBirth() {
+  const n = grid.n, total = n * n;
+  if (grid.cells.size >= total) return;
+  if (grid.frontier.length > total * 2) rebuildFrontier();
+  let c, r;
+  if (grid.frontier.length && prng() < 0.8) {
+    for (let t = 0; t < 10; t++) {
+      const i = (prng() * grid.frontier.length) | 0;
+      const key = grid.frontier[i];
+      if (!grid.cells.has(key)) {
+        grid.frontier[i] = grid.frontier[grid.frontier.length - 1];
+        grid.frontier.pop();
+        r = (key / n) | 0; c = key % n;
+        grid._add(key, c, r);
+        return;
+      }
+    }
+  }
+  for (let t = 0; t < 50; t++) {
+    const key = (prng() * total) | 0;
+    if (!grid.cells.has(key)) { r = (key / n) | 0; c = key % n; grid._add(key, c, r); return; }
+  }
+  for (let key = 0; key < total; key++) {
+    if (!grid.cells.has(key)) { r = (key / n) | 0; c = key % n; grid._add(key, c, r); return; }
+  }
+}
+grid._add = function (key, c, r) {
+  const n = this.n;
+  const hue = Math.round(((c / n) * 0.55 + (r / n) * 0.45) * 360 + E * 140 + prng() * 14);
+  const L = 42 + prng() * 30 + E * 12;
+  this.cells.set(key, { key, fill: 'hsl(' + hue + ',90%,' + L.toFixed(0) + '%)', born: performance.now() / 1000, life: 12 });
+  for (const [nc, nr] of NB) {
+    if (nc >= 0 && nc < n && nr >= 0 && nr < n && !this.cells.has(nr * n + nc)) this.frontier.push(nr * n + nc);
+  }
+};
+function gridTick() {
+  const total = grid.n * grid.n;
+  const remaining = total - grid.cells.size;
+  if (remaining <= 0) return;
+  const perTick = Math.max(1, Math.ceil(total / (genDuration * 10)));
+  const count = Math.min(perTick, remaining);
+  for (let i = 0; i < count; i++) gridBirth();
+}
+function drawGrid() {
+  const t = performance.now() / 1000;
+  ctx.fillStyle = '#020408'; ctx.fillRect(0, 0, W, H);
+  const n = grid.n, cell = grid.cell, ox = grid.ox, oy = grid.oy, side = grid.side;
+  ctx.strokeStyle = 'rgba(120,240,200,.05)'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#050b12'; ctx.fillRect(ox, oy, side, side);
+  ctx.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const x = ox + i * cell;
+    ctx.moveTo(x, oy); ctx.lineTo(x, oy + side);
+    const y = oy + i * cell;
+    ctx.moveTo(ox, y); ctx.lineTo(ox + side, y);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(140,255,220,.45)'; ctx.strokeRect(ox, oy, side, side);
+  const pad = cell * 0.08;
+  for (const v of grid.cells.values()) {
+    const age = t - v.born;
+    const a = clamp(1 - age / v.life, 0, 1);
+    const fresh = age < 0.6 ? 1 - age / 0.6 : 0;
+    const x = ox + (v.key % n) * cell, y = oy + ((v.key / n) | 0) * cell;
+    ctx.globalAlpha = 0.15 + 0.85 * a;
+    ctx.fillStyle = v.fill;
+    ctx.fillRect(x + pad, y + pad, cell - 2 * pad, cell - 2 * pad);
+    if (fresh > 0.05) {
+      ctx.globalAlpha = fresh * 0.45;
+      ctx.fillRect(x - pad * 0.6, y - pad * 0.6, cell + pad * 1.2, cell + pad * 1.2);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ================= particles mode ================= */
+const part = {
+  max: 1000, n: 0,
+  x: new Float32Array(1600), y: new Float32Array(1600),
+  vx: new Float32Array(1600), vy: new Float32Array(1600),
+  ph: new Float32Array(1600)
+};
+function partAdapt() { part.max = clamp(Math.round(W * H / 900) | 0, 400, 1600); }
+function partReset() { part.n = 0; }
+function updateParticles(dt) {
+  const target = Math.min(Math.round(part.max * genProgress), part.max);
+  if (part.n < target) {
+    const add = Math.min(target - part.n, Math.max(1, Math.ceil(part.max * dt / genDuration) + 1));
+    for (let i = 0; i < add; i++) {
+      const idx = part.n++;
+      part.x[idx] = prng() * W; part.y[idx] = prng() * H;
+      part.vx[idx] = (prng() - 0.5) * 2; part.vy[idx] = (prng() - 0.5) * 2;
+      part.ph[idx] = prng();
+    }
+  } else if (part.n > target) part.n = target;
+  const T = E;
+  const jx = 0.25 + T * 2.2, flow = 0.5 + T * 1.6;
+  for (let i = 0; i < part.n; i++) {
+    const x = part.x[i], y = part.y[i];
+    const fx = Math.sin(x * 0.004 + nowT * 0.5) + Math.cos(y * 0.003 - nowT * 0.4);
+    const fy = Math.cos(y * 0.004 + nowT * 0.45) + Math.sin(x * 0.003 - nowT * 0.35);
+    part.vx[i] = part.vx[i] * 0.88 + fx * 0.05 * flow + (prng() - 0.5) * jx;
+    part.vy[i] = part.vy[i] * 0.88 + fy * 0.05 * flow + (prng() - 0.5) * jx;
+    const sp = Math.hypot(part.vx[i], part.vy[i]), mx = 0.8 + T * 2.4;
+    if (sp > mx) { part.vx[i] *= mx / sp; part.vy[i] *= mx / sp; }
+    part.x[i] += part.vx[i]; part.y[i] += part.vy[i];
+    if (part.x[i] < 0) part.x[i] += W; else if (part.x[i] >= W) part.x[i] -= W;
+    if (part.y[i] < 0) part.y[i] += H; else if (part.y[i] >= H) part.y[i] -= H;
+  }
+}
+function drawParticles() {
+  ctx.fillStyle = 'rgba(2,4,8,0.32)'; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  const T = E;
+  for (let i = 0; i < part.n; i++) {
+    ctx.fillStyle = 'hsla(' + Math.round((part.ph[i] * 360 + T * 140) % 360) + ',90%,' + (50 + T * 16) + '%,' + (0.12 + T * 0.25) + ')';
+    ctx.fillRect(part.x[i], part.y[i], 2, 2);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ================= noise mode ================= */
+const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null };
+// precomputed RGB palette covering the full hue wheel (index = byte value)
+const grainPal = new Uint8ClampedArray(256 * 3);
+for (let i = 0; i < 256; i++) {
+  const hue = (i / 255) * 360;
+  const c = (1 - Math.abs(2 * 50 / 100 - 1)) * (85 / 100);
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = 0.5 - c / 2;
+  let r, g, b;
+  if (hue < 60) { r = c; g = x; b = 0; }
+  else if (hue < 120) { r = x; g = c; b = 0; }
+  else if (hue < 180) { r = 0; g = c; b = x; }
+  else if (hue < 240) { r = 0; g = x; b = c; }
+  else if (hue < 300) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  grainPal[i * 3] = Math.round((r + m) * 255);
+  grainPal[i * 3 + 1] = Math.round((g + m) * 255);
+  grainPal[i * 3 + 2] = Math.round((b + m) * 255);
+}
+function grainInit() {
+  if (W < 600) { grain.cw = 96; grain.ch = 54; } else { grain.cw = 128; grain.ch = 72; }
+  grain.cv = document.createElement('canvas');
+  grain.cv.width = grain.cw; grain.cv.height = grain.ch;
+  grain.gctx = grain.cv.getContext('2d');
+  grain.img = grain.gctx.createImageData(grain.cw, grain.ch);
+}
+function fillGrain() {
+  const d = grain.img.data;
+  const buf = crBytes(grain.cw * grain.ch * 2);
+  for (let i = 0; i < grain.cw * grain.ch; i++) {
+    const h = buf[i * 2], f = 0.45 + 0.55 * (buf[i * 2 + 1] / 255);
+    const o = i * 3, p = h * 3;
+    d[i * 4] = grainPal[p] * f; d[i * 4 + 1] = grainPal[p + 1] * f; d[i * 4 + 2] = grainPal[p + 2] * f; d[i * 4 + 3] = 255;
+  }
+  grain.gctx.putImageData(grain.img, 0, 0);
+}
+function drawNoise() {
+  ctx.fillStyle = '#04070c'; ctx.fillRect(0, 0, W, H);
+  const T = E, t2 = nowT * 0.2;
+  const b1x = W * (0.5 + 0.35 * Math.sin(t2)), b1y = H * (0.5 + 0.35 * Math.cos(t2 * 1.3));
+  const b2x = W * (0.5 + 0.35 * Math.cos(t2 * 0.9)), b2y = H * (0.5 + 0.3 * Math.sin(t2 * 1.1 + 2));
+  ctx.globalAlpha = 0.10 + T * 0.12;
+  const r1 = Math.max(W, H) * 0.5, r2 = Math.max(W, H) * 0.4;
+  const g1 = ctx.createRadialGradient(b1x, b1y, 0, b1x, b1y, r1);
+  g1.addColorStop(0, 'hsla(' + Math.round(T * 360) + ',90%,45%,0.5)'); g1.addColorStop(1, 'rgba(0,0,0,0)');
+  const g2 = ctx.createRadialGradient(b2x, b2y, 0, b2x, b2y, r2);
+  g2.addColorStop(0, 'hsla(' + Math.round((120 + T * 240) % 360) + ',80%,40%,0.4)'); g2.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g1; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = g2; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  if (prng() < 0.25 + T * 2.2) fillGrain();
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = (0.05 + T * 0.14) * (0.3 + genProgress * 0.7);
+  ctx.drawImage(grain.cv, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
+}
+
+/* ================= rain mode ================= */
+const rain = { cols: 0, heads: null, topCells: null, chars: [], lineH: 16, L: 12 };
+function rainInit() {
+  rain.cols = Math.max(16, Math.floor(W / 22));
+  rain.heads = new Float64Array(rain.cols);
+  rain.topCells = new Int32Array(rain.cols);
+  rain.chars = [];
+  rain.L = clamp(Math.round(H / 16), 8, 16);
+  for (let c = 0; c < rain.cols; c++) rain.chars.push([]);
+  rainReset();
+}
+function rainReset() {
+  if (!rain.heads) return;
+  for (let c = 0; c < rain.cols; c++) {
+    rain.heads[c] = -(prng() * H * 0.5);
+    rain.chars[c].length = 0;
+    rain.topCells[c] = Math.floor(rain.heads[c] / rain.lineH);
+  }
+}
+function updateRain(dt) {
+  const speed = (H + rain.L * rain.lineH) / genDuration * (0.25 + E * 1.9);
+  for (let c = 0; c < rain.cols; c++) {
+    rain.heads[c] += speed * dt;
+    const hc = Math.floor(rain.heads[c] / rain.lineH);
+    while (rain.topCells[c] < hc && rain.chars[c].length < rain.L) {
+      rain.chars[c].unshift(prng() < E * 0.5 ? '1' : '0');
+      rain.topCells[c]++;
+    }
+  }
+}
+function drawRain() {
+  ctx.fillStyle = 'rgba(2,4,8,0.10)'; ctx.fillRect(0, 0, W, H);
+  ctx.font = '13px ui-monospace,monospace';
+  ctx.textAlign = 'center';
+  const T = E;
+  for (let c = 0; c < rain.cols; c++) {
+    const x = c * 22 + 11;
+    const ch = rain.chars[c];
+    for (let k = 0; k < ch.length; k++) {
+      const y = rain.heads[c] - k * rain.lineH;
+      if (y < 0 || y > H) continue;
+      const a = 0.85 * (1 - k / ch.length);
+      ctx.fillStyle = 'hsla(' + Math.round(((c / rain.cols) * 360 + T * 60) % 360) + ',100%,' + (k === 0 ? 72 : 55) + '%,' + a + ')';
+      ctx.fillText(ch[k], x, y);
+    }
+  }
+}
+
+/* ================= render loop ================= */
+const canvas = $('#scene');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, dpr = 1, nowT = 0;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  gridLayout(); grainInit(); rainInit(); partAdapt();
+  $('#sysline').textContent = sysLine();
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 250));
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  if (paused) return;
+  nowT = now / 1000;
+  genT += dt;
+  if (genT >= genDuration) completeGeneration();
+  genProgress = genT / genDuration;
+  progressEl.style.width = (genProgress * 100) + '%';
+  if (mode === 'grid') {
+    gridAcc += dt;
+    while (gridAcc >= 0.1) { gridAcc -= 0.1; gridTick(); }
+    drawGrid();
+  } else if (mode === 'particles') {
+    updateParticles(dt);
+    drawParticles();
+  } else if (mode === 'noise') {
+    drawNoise();
+  } else if (mode === 'rain') {
+    updateRain(dt);
+    drawRain();
+  }
+  if (flash > 0.001) {
+    flash *= Math.exp(-dt * 2.5);
+    const r = Math.max(W, H) * 0.7;
+    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, r);
+    g.addColorStop(0, 'rgba(170,255,235,' + (flash * 0.35) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+/* ================= init ================= */
+buildSources();
+updateAvail();
+const genSlider = $('#gen-slider');
+genSlider.addEventListener('input', () => {
+  genDuration = +genSlider.value;
+  $('#gen-val').textContent = genDuration + 's';
+  resetGeneration();
+});
+const panel = $('#panel');
+if (matchMedia('(max-width: 640px)').matches) panel.classList.add('collapsed');
+$('#panel-head').addEventListener('click', () => {
+  const collapsed = panel.classList.toggle('collapsed');
+  $('#panel-arrow').textContent = collapsed ? '\u25b8' : '\u25be';
+});
+document.querySelectorAll('.mode-btn').forEach(b =>
+  b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('#pause-btn').addEventListener('click', togglePause);
+resize();
+resetGeneration();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
