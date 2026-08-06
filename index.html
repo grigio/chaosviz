@@ -161,8 +161,8 @@
     </div>
   </header>
   <nav id="modes">
-    <button class="mode-btn active" data-mode="noise">NOISE</button>
-    <button class="mode-btn" data-mode="particles">PARTICLES</button>
+    <button class="mode-btn" data-mode="noise">NOISE</button>
+    <button class="mode-btn active" data-mode="particles">PARTICLES</button>
   </nav>
   <aside id="panel">
     <div id="panel-head"><span>SOURCES</span><span id="panel-note">tap to toggle</span><span id="panel-arrow">▾</span></div>
@@ -281,10 +281,10 @@ function makeEstimator(maxBps, shift) {
 
 /* ================= sources ================= */
 const SRC = {};
-const ORDER = ['timer', 'pointer', 'keys', 'cpu', 'crypto', 'net', 'battery', 'orient'];
+const ORDER = ['timer', 'pointer', 'keys', 'cpu', 'crypto'];
 const SRC_COLORS = {
   timer: '#8fffc0', pointer: '#7fd7ff', keys: '#ffd27d', cpu: '#ff8f8f',
-  crypto: '#d99fff', net: '#ffb47d', battery: '#9fdf7d', orient: '#7de8d9'
+  crypto: '#d99fff'
 };
 function defSrc(key, name, unit, max, opts) {
   const s = Object.assign({
@@ -302,10 +302,6 @@ const ptrS   = defSrc('pointer','POINTER', 'bits/s', 6000);
 const keyS   = defSrc('keys',   'KEYS',    'bits/s', 600);
 const cpuS   = defSrc('cpu',    'CPU LOAD','%',      100, { gauge: true });
 const rngS   = defSrc('crypto', 'HW RNG',  'MiB/s',  16,  { gauge: true });
-const netS   = defSrc('net',    'NET RTT', 'bits/s', 300, { shift: 8 });
-const batS   = defSrc('battery','BATTERY', '%',      100, { gauge: true });
-const oriS   = defSrc('orient', 'ORIENT',  'bits/s', 4000);
-netS.enabled = false;
 
 const srcList = [];
 function buildSources() {
@@ -323,7 +319,6 @@ function buildSources() {
       if (!s.available) return;
       s.enabled = !s.enabled;
       row.classList.toggle('off', !s.enabled);
-      if (s.key === 'net' && s.enabled && !s.started) { s.started = true; netPing(); }
     });
     s.row = row; s.valEl = row.querySelector('.val b'); s.canvas = row.querySelector('canvas');
     s.dot = row.querySelector('.dot');
@@ -420,50 +415,6 @@ setInterval(() => {
   Pool.addBytes(arr);
 }, 500);
 
-// Network RTT jitter (opt-in, no permission)
-function netPing() {
-  const img = new Image();
-  const t0 = performance.now();
-  const done = () => {
-    if (!netS.enabled) return;
-    const dt = performance.now() - t0;
-    netS.bps = netS.est.note(performance.now());
-    netS.lastSample = performance.now();
-    Pool.add((Math.round(dt * 1000) >>> 0) ^ 0x7e4a);
-    setTimeout(netPing, 1200 + prng() * 1800);
-  };
-  img.onload = done; img.onerror = done;
-  img.src = 'https://www.google.com/favicon.ico?r=' + Math.random();
-}
-
-// Battery (no permission)
-if (navigator.getBattery) {
-  navigator.getBattery().then(b => {
-    batS.available = true; updateAvail();
-    const upd = () => {
-      batS.value = b.level * 100;
-      batS.bps = 30;
-      batS.lastSample = performance.now();
-      Pool.add((((b.level * 1000) | 0) ^ (b.charging ? 0x5a5a : 0xa5a5)) >>> 0);
-    };
-    upd();
-    b.addEventListener('levelchange', upd);
-    b.addEventListener('chargingchange', upd);
-  }).catch(() => { batS.available = false; updateAvail(); });
-} else { batS.available = false; }
-
-// Device orientation (mobile only, auto-detected)
-if ('DeviceOrientationEvent' in window) {
-  window.addEventListener('deviceorientation', ev => {
-    if (!oriS.enabled) return;
-    if (!oriS.available) { oriS.available = true; updateAvail(); }
-    const t = performance.now();
-    oriS.bps = oriS.est.note(t);
-    Pool.add((((ev.alpha * 10000) | 0) ^ ((ev.beta * 10000) | 0) ^ ((ev.gamma * 10000) | 0) ^ ((t * 1000) | 0)) >>> 0);
-  }, true);
-  setTimeout(() => { if (!oriS.available) { oriS.available = false; updateAvail(); } }, 3000);
-}
-
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
 /* ================= HUD tick ================= */
@@ -548,7 +499,7 @@ setInterval(() => {
 
 /* ================= generation ================= */
 const MODES = ['noise', 'particles'];
-let mode = 'noise';
+let mode = 'particles';
 
 function togglePause() {
   paused = !paused;
@@ -724,7 +675,7 @@ for (let i = 0; i < 256; i++) {
   grainPal[i * 3 + 2] = Math.round((b + m) * 255);
 }
 function grainInit() {
-  if (W < 600) { grain.cw = 96; grain.ch = 54; } else { grain.cw = 128; grain.ch = 72; }
+  if (W < 600) { grain.cw = 128; grain.ch = 72; } else { grain.cw = 160; grain.ch = 90; }
   grain.cv = document.createElement('canvas');
   grain.cv.width = grain.cw; grain.cv.height = grain.ch;
   grain.gctx = grain.cv.getContext('2d');
