@@ -825,7 +825,9 @@ function drawNoise() {
   // The grain is scaled uniformly (cover) so the colored squares stay square
   // on any canvas size, centered with overflow cropped. The white CHAOS art
   // sits on top; each colored square that lands on it erases that part.
-  const scale = Math.max(W / grain.cw, H / grain.ch);
+  // integer scale so every colored square is exactly the same size (a fractional
+  // cover scale would make nearest-neighbor squares alternate between sizes)
+  const scale = Math.max(1, Math.ceil(Math.max(W / grain.cw, H / grain.ch)));
   grain.ox = (W - grain.cw * scale) / 2;
   grain.oy = (H - grain.ch * scale) / 2;
   grain.scale = scale;

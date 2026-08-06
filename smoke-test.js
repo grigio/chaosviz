@@ -293,10 +293,10 @@ if (!failed) {
     const scale = vm.runInContext('grain.scale', sandbox);
     const gw = vm.runInContext('grain.cw', sandbox), gh = vm.runInContext('grain.ch', sandbox);
     const sqDraw = drawImages.filter(a => a.length >= 5 && Math.abs(a[3] - gw * scale) < 0.001 && Math.abs(a[4] - gh * scale) < 0.001).length;
-    if (sqDraw >= 1) {
-      console.log('SQUARE PIXELS OK (uniform cover scale ' + scale.toFixed(2) + ')');
+    if (sqDraw >= 1 && Number.isInteger(scale)) {
+      console.log('SQUARE PIXELS OK (integer cover scale ' + scale + ')');
     } else {
-      console.error('SQUARE PIXELS FAILED: no uniform-scale grain draw found');
+      console.error('SQUARE PIXELS FAILED: no uniform-scale grain draw found (scale=' + scale + ', integer=' + Number.isInteger(scale) + ')');
       failed = true;
     }
   } catch (e) { console.error('SQUARE PIXELS CHECK ERROR:', e.message); failed = true; }
