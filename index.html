@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#020408">
-<title>ENTROPY//viz</title>
+<title>CHAOSVIZ</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -42,6 +42,9 @@
     font-size: 13px; letter-spacing: 3px; color: #7df;
     text-shadow: 0 0 12px rgba(80,220,255,.5);
   }
+  #sheet-modes { display: none; }
+  #sheet-toggle { display: flex; align-items: center; gap: 8px; flex: 1; }
+  #sheet-toggle #panel-note { margin-left: auto; }
   #brand .cursor { animation: blink 1s steps(1) infinite; color: #0ff; }
   @keyframes blink { 50% { opacity: 0; } }
   #pool {
@@ -105,7 +108,7 @@
     padding: 8px 12px; font-size: 10px; letter-spacing: 2px; color: #9fe;
     cursor: pointer; user-select: none;
   }
-  #panel-note { margin-left: auto; color: rgba(160,220,240,.4); font-size: 9px; letter-spacing: 1px; }
+  #panel-note { color: rgba(160,220,240,.4); font-size: 9px; letter-spacing: 1px; }
   #panel-arrow { color: rgba(160,220,240,.5); font-size: 10px; }
   #panel.collapsed #sources { display: none; }
   #sources { display: flex; flex-direction: column; border-top: 1px solid rgba(120,240,200,.12); }
@@ -138,11 +141,39 @@
     font-size: 9px; letter-spacing: 1px; color: rgba(160,220,240,.35);
   }
   @media (max-width: 640px) {
-    #brand { font-size: 12px; }
+    #brand { font-size: 12px; letter-spacing: 2px; }
     #rate-num { font-size: 18px; }
-    #panel { width: 280px; max-height: calc(100vh - 180px); }
-    .mode-btn { padding: 9px 8px; min-width: 40px; letter-spacing: 1px; }
+    #pool { max-width: 34vw; }
     #hint { display: none; }
+    #modes { display: none; }
+    #sheet-modes { display: flex; gap: 6px; }
+    #sheet-toggle { flex: 0 0 auto; }
+    #sheet-toggle #panel-note { display: none; }
+    #pause-btn { width: 44px; height: 44px; font-size: 13px; }
+    /* bottom-sheet panel: thumb-friendly control bar, slides up over the canvas */
+    #panel {
+      top: auto;
+      left: 8px; right: 8px;
+      bottom: calc(8px + env(safe-area-inset-bottom));
+      width: auto; max-width: none;
+      max-height: min(56vh, calc(100vh - 150px));
+      border-radius: 14px;
+      -webkit-overflow-scrolling: touch;
+      transition: max-height .25s ease;
+    }
+    #panel.collapsed { max-height: 52px; }
+    #panel.collapsed #gen-ctl { display: none; }
+    #panel-head {
+      height: 52px; padding: 0 8px;
+      justify-content: space-between;
+      position: sticky; top: 0;
+      background: rgba(4,12,18,.85);
+      border-radius: 14px;
+    }
+    .mode-btn { padding: 0 14px; min-width: 0; min-height: 40px; font-size: 11px; letter-spacing: 1px; }
+    .src { padding: 11px 12px; }
+    .src .val { min-width: 68px; }
+    #gen-slider { height: 26px; }
   }
 </style>
 </head>
@@ -152,7 +183,7 @@
 <div id="hud">
   <header id="topbar">
     <div>
-      <div id="brand">ENTROPY<span class="cursor">_</span></div>
+      <div id="brand">CHAOSVIZ<span class="cursor">_</span></div>
       <div id="pool"></div>
     </div>
     <div id="right">
@@ -165,7 +196,13 @@
     <button class="mode-btn active" data-mode="particles">PARTICLES</button>
   </nav>
   <aside id="panel">
-    <div id="panel-head"><span>SOURCES</span><span id="panel-note">tap to toggle</span><span id="panel-arrow">▾</span></div>
+    <div id="panel-head">
+      <span id="sheet-modes">
+        <button class="mode-btn" data-mode="noise">NOISE</button>
+        <button class="mode-btn active" data-mode="particles">PARTICLES</button>
+      </span>
+      <span id="sheet-toggle"><span>SOURCES</span><span id="panel-note">tap to toggle</span><span id="panel-arrow">▸</span></span>
+    </div>
     <div id="sources"></div>
     <div id="gen-ctl">
       <div class="ctl-row"><label>GENERATION</label><span id="gen-val">10s</span></div>
@@ -416,7 +453,11 @@ setInterval(() => {
   Pool.addBytes(arr);
 }, 500);
 
-document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+// keep the canvas a full-screen touch surface, but let the panel scroll
+// (source list / generation controls) instead of swallowing every touchmove
+document.addEventListener('touchmove', e => {
+  if (!e.target || !e.target.closest || !e.target.closest('#panel')) e.preventDefault();
+}, { passive: false });
 
 /* ================= HUD tick ================= */
 const MAX_RATE = 5000;
@@ -741,6 +782,9 @@ function tickGrain(frac) {
   const buf = Pool.getBytes(k * 2); // bytes come from the harvested pool
   // horizontal cursor position sets the global color phase; entropy sweeps it over time
   const rot = (((ptr.x >= 0 ? ptr.x / W : 0) * 256 + nowT * 20 * E) | 0) % 256;
+  // entropy-scaled brightness band: calm dim shimmer at low E, vivid high-contrast
+  // snow at high E (film-grain static that visibly intensifies with entropy)
+  const spread = 0.35 + E * 0.45, base = 0.45 + E * 0.25;
   // the static boils in a patch around the cursor; the patch grows with velocity
   // (grain screen geometry comes from grain.ox/oy/scale set in drawNoise)
   const gx0 = (ptr.x - grain.ox) / grain.scale, gy0 = (ptr.y - grain.oy) / grain.scale;
@@ -781,7 +825,7 @@ function tickGrain(frac) {
     const idx = py * grain.cw + px;
     if (eatArt) eraseArtAt(px, py);
     const h = (buf[bi++] + rot) % 256;
-    const f = 0.7 + 0.3 * (buf[bi++] / 255);
+    const f = Math.min(1, base + spread * (buf[bi++] / 255 - 0.5));
     const p = h * 3, o = idx * 4;
     data[o] = grainPal[p] * f;
     data[o + 1] = grainPal[p + 1] * f;
@@ -805,13 +849,13 @@ function eraseArtAt(px, py) {
     for (let ax = x0; ax < x1; ax++) if (bm[row + ax]) { bm[row + ax] = 0; art.remaining--; }
   }
 }
-function writeGrainCell(px, py, rot, bright) {
+function writeGrainCell(px, py, rot, bright, spread, base) {
   const cw = grain.cw, ch = grain.ch;
   px = ((px % cw) + cw) % cw;
   py = ((py % ch) + ch) % ch;
   const idx = py * cw + px;
   const h = (((prng() * 256) | 0) + rot) % 256;
-  const f = 0.5 + 0.5 * bright * (0.7 + 0.3 * prng());
+  const f = Math.min(1, base + spread * (bright * (0.6 + 0.4 * prng()) - 0.5));
   const p = h * 3, o = idx * 4, d = grain.img.data;
   d[o] = grainPal[p] * f; d[o + 1] = grainPal[p + 1] * f; d[o + 2] = grainPal[p + 2] * f; d[o + 3] = 255;
   if (art.remaining > 0 && nowT >= art.holdUntil) eraseArtAt(px, py);
@@ -820,11 +864,14 @@ function paintBrush(gx, gy, speed, boost) {
   const r = clamp(0.6 + (speed * 0.0012 + (boost || 0)) * 1.4, 0.6, 4.5); // brush radius in grain cells
   const bright = 0.55 + 0.45 * Math.min(1, speed / 1600);
   const rot = (((ptr.x >= 0 ? ptr.x / W : 0) * 256) | 0) % 256;
+  // same entropy-scaled brightness band as the ambient static so hand-painted
+  // squares blend naturally with the boil
+  const spread = 0.35 + E * 0.45, base = 0.45 + E * 0.25;
   const n = Math.max(1, Math.round(r * r * Math.PI * (0.6 + 0.4 * Math.min(1, speed / 1600))));
   for (let i = 0; i < n; i++) {
     const ang = prng() * Math.PI * 2;
     const rad = r * Math.sqrt(prng());
-    writeGrainCell(Math.round(gx + Math.cos(ang) * rad), Math.round(gy + Math.sin(ang) * rad), rot, bright);
+    writeGrainCell(Math.round(gx + Math.cos(ang) * rad), Math.round(gy + Math.sin(ang) * rad), rot, bright, spread, base);
   }
   grain.gctx.putImageData(grain.img, 0, 0);
 }
@@ -947,13 +994,25 @@ genSlider.addEventListener('input', () => {
   resetGeneration();
 });
 const panel = $('#panel');
-if (matchMedia('(max-width: 640px)').matches) panel.classList.add('collapsed');
+// the sources panel is a collapsible bottom sheet on phones; collapse it
+// automatically whenever the mobile breakpoint is entered (rotate, resize)
+const mqMobile = matchMedia('(max-width: 640px)');
+function syncPanel() {
+  panel.classList.toggle('collapsed', mqMobile.matches);
+  $('#panel-arrow').textContent = panel.classList.contains('collapsed') ? '\u25b8' : '\u25be';
+}
+syncPanel();
+if (mqMobile.addEventListener) mqMobile.addEventListener('change', syncPanel);
+else if (mqMobile.addListener) mqMobile.addListener(syncPanel);
 $('#panel-head').addEventListener('click', () => {
   const collapsed = panel.classList.toggle('collapsed');
   $('#panel-arrow').textContent = collapsed ? '\u25b8' : '\u25be';
 });
 document.querySelectorAll('.mode-btn').forEach(b =>
-  b.addEventListener('click', () => setMode(b.dataset.mode)));
+  b.addEventListener('click', e => {
+    e.stopPropagation(); // mode buttons live inside the sheet header; don't toggle it
+    setMode(b.dataset.mode);
+  }));
 $('#pause-btn').addEventListener('click', togglePause);
 resize();
 resetGeneration();
