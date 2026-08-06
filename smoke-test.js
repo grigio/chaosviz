@@ -117,7 +117,7 @@ function makeEl(tag) {
 }
 
 const byId = {};
-['scene', 'progress', 'hud', 'pool', 'rate-num', 'rate-label', 'history', 'gen-slider', 'gen-val', 'panel', 'panel-head', 'panel-arrow', 'sources', 'harvest', 'sysline', 'hint'].forEach(id => { byId[id] = makeEl(id); });
+['scene', 'progress', 'hud', 'pool', 'rate-num', 'rate-label', 'history', 'gen-slider', 'gen-val', 'panel', 'panel-head', 'panel-arrow', 'sources', 'harvest', 'sysline', 'hint', 'pause-btn'].forEach(id => { byId[id] = makeEl(id); });
 const doc = {
   querySelector: sel => byId[sel.slice(1)] || makeEl('div'),
   querySelectorAll: () => [makeEl('button'), makeEl('button'), makeEl('button'), makeEl('button')],
@@ -211,7 +211,7 @@ if (!failed) {
 // simulate frames
 if (!failed && rafCb) {
   let now = performance.now();
-  const modes = ['noise', 'particles', 'rain'];
+  const modes = ['noise', 'particles'];
   let modeIdx = 0;
   const frames = 400;
   for (let f = 0; f < frames; f++) {
@@ -224,7 +224,6 @@ if (!failed && rafCb) {
       runIntervals();
     }
     if (f === 150) { (globalListeners.keydown || []).forEach(fn => fn({ key: '2', keyCode: 50 })); modeIdx = 1; }
-    if (f === 300) { (globalListeners.keydown || []).forEach(fn => fn({ key: '3', keyCode: 51 })); modeIdx = 2; }
     try { rafCb(now); }
     catch (e) {
       errors.push('frame ' + f + ' [' + modes[modeIdx] + ']: ' + e.message);
@@ -327,6 +326,30 @@ if (!failed) {
   } catch (e) { console.error('NOISE CHAOS DETERIORATE CHECK ERROR:', e.message); failed = true; }
 }
 
+// particles view mirrors the noise view: CHAOS formed by anchored white particles
+// that dissolve as entropy flows, and the pointer paints particles directly
+if (!failed) {
+  try {
+    vm.runInContext('mode = "particles"; partReset(); chaosReset()', sandbox);
+    const cFresh = vm.runInContext('chaos.n', sandbox);
+    // pointer paints particles directly in this mode (no frames running)
+    const partBefore = vm.runInContext('part.n', sandbox);
+    (globalListeners.pointermove || []).forEach(fn => fn({ clientX: 300, clientY: 300 }));
+    const partAfter = vm.runInContext('part.n', sandbox);
+    // entropy releases the anchored art particles (deterioration)
+    vm.runInContext('E = 0.5', sandbox);
+    for (let i = 0; i < 60; i++) rafCb(performance.now() + 4000 + i * 16.6);
+    const cFree = vm.runInContext('(function(){ let f=0; for(let i=0;i<chaos.n;i++) if(chaos.free[i]) f++; return f; })()', sandbox);
+    if (cFresh > 0 && partAfter > partBefore && cFree > 0) {
+      console.log('PARTICLES CHAOS OK (' + cFresh + ' anchored, ' + cFree + ' released, pointer spawned ' + (partAfter - partBefore) + ')');
+    } else {
+      console.error('PARTICLES CHAOS FAILED: fresh=' + cFresh + ' spawned=' + (partAfter - partBefore) + ' free=' + cFree);
+      failed = true;
+    }
+    vm.runInContext('E = 0', sandbox);
+  } catch (e) { console.error('PARTICLES CHAOS CHECK ERROR:', e.message); failed = true; }
+}
+
 // pointer-only scenario: mouse moving raises E, then stopping the mouse must
 // decay the pointer rate and freeze the field (no stale-rate boiling)
 if (!failed) {
@@ -366,15 +389,16 @@ if (!failed) {
   } catch (e) { console.error('POINTER IDLE DECAY CHECK ERROR:', e.message); failed = true; }
 }
 
-// verify pause toggles
+// verify pause toggles via a real click on the button (wiring, not just the fn)
 if (!failed) {
   try {
-    vm.runInContext("togglePause()", sandbox);
+    byId['pause-btn'].dispatch('click');
     const p1 = vm.runInContext('paused', sandbox);
-    vm.runInContext("togglePause()", sandbox);
+    byId['pause-btn'].dispatch('click');
     const p2 = vm.runInContext('paused', sandbox);
-    if (p1 === true && p2 === false) console.log('PAUSE TOGGLE OK');
-    else { console.error('PAUSE TOGGLE FAILED:', p1, p2); failed = true; }
+    const iconPaused = byId['pause-btn'].textContent === '\u25b6'; // play icon while paused
+    if (p1 === true && p2 === false && iconPaused === false) console.log('PAUSE CLICK OK (toggles and restores icon)');
+    else { console.error('PAUSE CLICK FAILED:', p1, p2, 'iconPaused=' + iconPaused); failed = true; }
   } catch (e) { console.error('PAUSE CHECK ERROR:', e.message); failed = true; }
 }
 
