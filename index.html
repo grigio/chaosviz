@@ -613,6 +613,14 @@ function drawParticles() {
 }
 
 /* ================= noise mode ================= */
+// figlet "standard" CHAOS in pure ASCII (5 lines x 41 cols)
+const CHAOS_ART = [
+  '  ____   _   _      _       ___    ____  ',
+  ' / ___| | | | |    / \\     / _ \\  / ___| ',
+  '| |     | |_| |   / _ \\   | | | | \\\\___ \\ ',
+  '| |___  |  _  |  / ___ \\  | |_| |  ___) |',
+  ' \\\\____| |_| |_| /_/   \\\\_\\  \\\\___/  |____/ '
+];
 const grain = { cw: 128, ch: 72, cv: null, gctx: null, img: null };
 // precomputed RGB palette covering the full hue wheel (index = byte value)
 const grainPal = new Uint8ClampedArray(256 * 3);
@@ -638,7 +646,7 @@ function grainInit() {
   grain.cv.width = grain.cw; grain.cv.height = grain.ch;
   grain.gctx = grain.cv.getContext('2d');
   grain.img = grain.gctx.createImageData(grain.cw, grain.ch);
-  fillGrain(true); // the initial noise is full black; entropy paints the canvas
+  fillGrain(true); // the initial pixel state is black
 }
 function fillGrain(black) {
   const d = grain.img.data;
@@ -656,7 +664,10 @@ function fillGrain(black) {
   }
   grain.gctx.putImageData(grain.img, 0, 0);
 }
-function grainReset() { fillGrain(true); } // each generation starts black
+function grainReset() {
+  fillGrain(true);
+  artReset(); // every generation starts with black + white CHAOS
+}
 function tickGrain(frac) {
   const len = grain.cw * grain.ch;
   const k = Math.max(1, Math.round(len * frac));
@@ -690,17 +701,63 @@ function tickGrain(frac) {
   }
   grain.gctx.putImageData(grain.img, 0, 0);
 }
+
+/* ---------- CHAOS art: full-res white art that deteriorates as entropy arrives ---------- */
+const ART_HOLD_S = 1.0; // seconds the fresh art is protected from deterioration
+const art = { cv: null, ctx: null, img: null, mask: null, left: 0, holdUntil: 0 };
+function artReset() {
+  if (!art.cv) {
+    art.cv = document.createElement('canvas');
+    art.cv.width = W; art.cv.height = H;
+    art.ctx = art.cv.getContext('2d');
+  }
+  art.ctx.save();
+  art.ctx.clearRect(0, 0, W, H); // transparent background: only the white art shows
+  const fs = Math.max(14, Math.floor(Math.min(W / 46, H / 12)));
+  art.ctx.fillStyle = '#ffffff';
+  art.ctx.font = fs + 'px ui-monospace,monospace';
+  art.ctx.textAlign = 'center';
+  art.ctx.textBaseline = 'middle';
+  const lineH = fs * 1.12;
+  const top = H / 2 - (CHAOS_ART.length * lineH) / 2 + fs * 0.35;
+  for (let i = 0; i < CHAOS_ART.length; i++) art.ctx.fillText(CHAOS_ART[i], W / 2, top + i * lineH);
+  art.ctx.restore();
+  // snapshot the art pixels so they can be erased one at a time (deterioration)
+  art.img = art.ctx.getImageData(0, 0, W, H);
+  art.mask = [];
+  const d = art.img.data;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 100 || d[i + 1] > 100 || d[i + 2] > 100) art.mask.push(i >> 2);
+  // shuffle so decay eats the letters at random, not in scan order
+  for (let i = art.mask.length - 1; i > 0; i--) {
+    const j = (prng() * (i + 1)) | 0;
+    const t = art.mask[i]; art.mask[i] = art.mask[j]; art.mask[j] = t;
+  }
+  art.left = art.mask.length;
+  art.holdUntil = nowT + ART_HOLD_S;
+}
+function artDeteriorate() {
+  if (!art.mask || art.left === 0 || nowT < art.holdUntil) return;
+  // erase a fraction of the remaining art pixels per frame; entropy speeds decay
+  const frac = Math.min(0.3, 0.015 + E * 0.3);
+  const n = Math.max(1, Math.round(art.left * frac));
+  for (let i = 0; i < n && art.left > 0; i++) {
+    const idx = art.mask[--art.left];
+    art.ctx.clearRect(idx % W, (idx / W) | 0, 2, 2);
+  }
+}
 function drawNoise() {
   // full-opacity, full-spectrum colored static; entropy drives the boil rate.
-  // With every source disabled (E≈0) the field freezes completely.
+  // The white CHAOS art sits on top and deteriorates pixel by pixel as entropy
+  // flows in, until it is gone for this generation.
   if (E > 0.005) tickGrain(Math.min(0.8, 0.2 + E * 0.7));
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
   ctx.drawImage(grain.cv, 0, 0, W, H);
-  ctx.globalAlpha = 1;
   ctx.imageSmoothingEnabled = true;
+  artDeteriorate();
+  if (art.left > 0) ctx.drawImage(art.cv, 0, 0, W, H);
+  ctx.globalAlpha = 1;
 }
-
 /* ================= rain mode ================= */
 const rain = { cols: 0, heads: null, topCells: null, chars: [], lineH: 16, L: 12 };
 function rainInit() {
@@ -760,6 +817,7 @@ function resize() {
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   grainInit(); rainInit(); partAdapt();
+  if (art.cv) artReset(); // rebuild the CHAOS art for the new size
   $('#sysline').textContent = sysLine();
 }
 addEventListener('resize', resize);

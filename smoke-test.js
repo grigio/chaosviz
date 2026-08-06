@@ -10,24 +10,75 @@ if (!script) { console.error('NO SCRIPT'); process.exit(1); }
 
 /* ---------- stubs ---------- */
 const fillRects = [];
-function makeCtx() {
+const fillTexts = [];
+const ctxStyles = [];
+function ensureData(state) {
+  if (!state.data && state.width && state.height) {
+    state.data = new Uint8ClampedArray(state.width * state.height * 4);
+  }
+  return state.data;
+}
+function rasterize(state, text, x, y) {
+  const d = ensureData(state);
+  if (!d || !text) return;
+  const w = state.width, h = state.height;
+  const half = Math.floor(String(text).length * 6);
+  const bx = Math.floor(x), by = Math.floor(y);
+  for (let dx = -half; dx <= half; dx++) {
+    for (let dy = -10; dy <= 4; dy++) {
+      const px = bx + dx, py = by + dy;
+      if (px >= 0 && px < w && py >= 0 && py < h) {
+        const o = (py * w + px) * 4;
+        d[o] = 255; d[o + 1] = 255; d[o + 2] = 255; d[o + 3] = 255;
+      }
+    }
+  }
+}
+function clearRegion(state, x, y, w, h) {
+  const d = ensureData(state);
+  if (!d) return;
+  for (let py = Math.max(0, Math.floor(y)); py < Math.min(state.height, Math.ceil(y + h)); py++) {
+    for (let px = Math.max(0, Math.floor(x)); px < Math.min(state.width, Math.ceil(x + w)); px++) {
+      const o = (py * state.width + px) * 4;
+      d[o] = 0; d[o + 1] = 0; d[o + 2] = 0; d[o + 3] = 0;
+    }
+  }
+}
+function makeCtx(state) {
   const gradient = { addColorStop() {} };
   return new Proxy({}, {
     get(t, k) {
       if (k === 'canvas') return makeCanvas();
-      if (k === 'fillRect') return (...a) => { fillRects.push(a); };
+      if (k === 'fillRect') return (x, y, w, h) => { fillRects.push([x, y, w, h]); if (state.data) clearRegion(state, x, y, w, h); };
+      if (k === 'clearRect') return (x, y, w, h) => { if (state.data) clearRegion(state, x, y, w, h); };
+      if (k === 'fillText') return (text, x, y) => { fillTexts.push([text, x, y]); rasterize(state, text, x, y); };
       if (k === 'createImageData') return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h });
       if (k === 'measureText') return () => ({ width: 10 });
-      if (k === 'getImageData') return () => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 });
+      if (k === 'putImageData') return (img) => { state.data = img.data.slice(); state.width = img.width; state.height = img.height; };
+      if (k === 'getImageData') return (x, y, w, h) => {
+        const data = state.data ? state.data.slice() : new Uint8ClampedArray(w * h * 4);
+        return { data, width: state.width || w, height: state.height || h };
+      };
       if (k === 'createRadialGradient' || k === 'createLinearGradient') return () => gradient;
       if (typeof k === 'string') return () => {};
       return undefined;
     },
-    set() { return true; }
+    set(t, k, v) { if (k === 'fillStyle') ctxStyles.push(v); return true; }
   });
 }
 function makeCanvas() {
-  return { width: 0, height: 0, style: {}, getContext: () => makeCtx(), addEventListener() {}, __canvas: true };
+  const state = { width: 0, height: 0, data: null };
+  const canvas = {
+    style: {},
+    addEventListener() {},
+    __state: state,
+    get width() { return state.width; },
+    set width(v) { state.width = v | 0; },
+    get height() { return state.height; },
+    set height(v) { state.height = v | 0; },
+    getContext: () => makeCtx(state)
+  };
+  return canvas;
 }
 function makeEl(tag) {
   const el = {
@@ -57,7 +108,7 @@ function makeEl(tag) {
     get value() { return this._value; },
     querySelector() { return makeEl('span'); },
     querySelectorAll() { return []; },
-    getContext() { return makeCtx(); },
+    getContext() { return makeCtx({ width: 0, height: 0, data: null }); },
     click() {}
   };
   return el;
@@ -134,6 +185,25 @@ if (!failed) {
       failed = true;
     }
   } catch (e) { console.error('NOISE INIT BLACK CHECK ERROR:', e.message); failed = true; }
+}
+
+// CHAOS art: the black canvas must start with the white ASCII art baked into a
+// full-res art layer (drawn at reset), and that layer must deteriorate gradually
+// as entropy arrives rather than vanishing instantly.
+if (!failed) {
+  try {
+    // a few pristine frames to exercise the draw path
+    for (let i = 0; i < 3; i++) rafCb(performance.now() + i * 16.6);
+    const artCount = fillTexts.filter(a => String(a[0]).length > 20).length; // art lines are 41 chars; rain glyphs are 1
+    const whiteUsed = ctxStyles.includes('#ffffff');
+    const leftFresh = vm.runInContext('art.left', sandbox);
+    if (artCount >= 5 && whiteUsed && leftFresh > 0) {
+      console.log('NOISE CHAOS ART OK (' + artCount + ' ASCII lines, ' + leftFresh + ' art pixels, white)');
+    } else {
+      console.error('NOISE CHAOS ART FAILED: lines=' + artCount + ' white=' + whiteUsed + ' artPixels=' + leftFresh);
+      failed = true;
+    }
+  } catch (e) { console.error('NOISE CHAOS ART CHECK ERROR:', e.message); failed = true; }
 }
 
 // simulate frames
@@ -214,6 +284,30 @@ if (!failed) {
     }
     vm.runInContext('srcList.forEach(s => s.enabled = true)', sandbox);
   } catch (e) { console.error('NOISE FREEZE CHECK ERROR:', e.message); failed = true; }
+}
+
+// CHAOS art must deteriorate gradually with entropy: protected during the hold
+// window, then eroded pixel by pixel to nothing (never vanishing in one frame)
+if (!failed) {
+  try {
+    vm.runInContext('mode = "noise"; artReset(); E = 0.5', sandbox);
+    const leftFresh = vm.runInContext('art.left', sandbox);
+    const baseT = performance.now();
+    // inside the hold window the art is untouched even at high entropy
+    for (let i = 0; i < 10; i++) rafCb(baseT + i * 16.6);
+    const leftHold = vm.runInContext('art.left', sandbox);
+    // past the hold window the art erodes frame by frame until it is gone
+    for (let i = 0; i < 150; i++) rafCb(baseT + 4000 + i * 16.6);
+    const leftAfter = vm.runInContext('art.left', sandbox);
+    const holdOK = leftHold === leftFresh;
+    const eroded = leftAfter === 0;
+    if (leftFresh > 0 && holdOK && eroded) {
+      console.log('NOISE CHAOS DETERIORATE OK (' + leftFresh + ' -> hold ' + leftHold + ' -> 0)');
+    } else {
+      console.error('NOISE CHAOS DETERIORATE FAILED: fresh=' + leftFresh + ' hold=' + leftHold + ' after=' + leftAfter);
+      failed = true;
+    }
+  } catch (e) { console.error('NOISE CHAOS DETERIORATE CHECK ERROR:', e.message); failed = true; }
 }
 
 // pointer-only scenario: mouse moving raises E, then stopping the mouse must
