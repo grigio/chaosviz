@@ -711,20 +711,37 @@ function tickGrain(frac) {
   // the static boils in a patch around the cursor; the patch grows with velocity
   // (grain screen geometry comes from grain.ox/oy/scale set in drawNoise)
   const gx0 = (ptr.x - grain.ox) / grain.scale, gy0 = (ptr.y - grain.oy) / grain.scale;
+  // clamp the patch center to the visible grain region so off-canvas cursors
+  // don't pile the patch into a tiny wrapped band at the grain edge
+  const cxl = grain.ox < 0 ? -grain.ox / grain.scale : 0;
+  const cxt = grain.oy < 0 ? -grain.oy / grain.scale : 0;
+  const cxr = Math.min(grain.cw - 1, (W - grain.ox) / grain.scale);
+  const cxb = Math.min(grain.ch - 1, (H - grain.oy) / grain.scale);
+  const pcx = clamp(gx0, cxl, cxr), pcy = clamp(gy0, cxt, cxb);
   const gr = clamp((40 + ptr.speed * 0.06) / grain.scale, 1, grain.cw * 0.5);
   const data = grain.img.data;
   // colored pixels that land on the CHAOS art erase it: the art disappears
   // because new colored squares come, not on its own
   const eatArt = art.remaining > 0 && nowT >= art.holdUntil;
   const cellW = Math.ceil(grain.scale), cellH = Math.ceil(grain.scale);
+  // rotating sweep: a fixed fraction of every tick repaints the sweep pointer so
+  // the whole field is guaranteed to be covered within ~5 ticks per sweep pass
+  grain.sweep = (grain.sweep || 0);
+  const sweepN = Math.max(1, Math.round(k * 0.2));
+  let sweepLeft = sweepN;
   let bi = 0;
   for (let j = 0; j < k; j++) {
     let px, py;
-    if (ptr.x >= 0 && prng() < 0.75) {
+    if (sweepLeft > 0) {
+      const si = grain.sweep % len;
+      px = si % grain.cw; py = (si / grain.cw) | 0;
+      grain.sweep = (grain.sweep + 1) % len;
+      sweepLeft--;
+    } else if (ptr.x >= 0 && prng() < 0.75) {
       const ang = prng() * Math.PI * 2;
       const r = gr * Math.sqrt(prng());
-      px = ((gx0 + Math.cos(ang) * r) % grain.cw + grain.cw) % grain.cw;
-      py = ((gy0 + Math.sin(ang) * r) % grain.ch + grain.ch) % grain.ch;
+      px = ((pcx + Math.cos(ang) * r) % grain.cw + grain.cw) % grain.cw;
+      py = ((pcy + Math.sin(ang) * r) % grain.ch + grain.ch) % grain.ch;
     } else {
       px = (prng() * grain.cw) | 0;
       py = (prng() * grain.ch) | 0;
